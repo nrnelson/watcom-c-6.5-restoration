@@ -1,0 +1,186 @@
+"""score.py - score the converter on the surviving small-code modules.
+
+usage: python3 -I tools/score.py [ZIP] [ROUTE ...] [-v]
+
+ROUTE is M>S (medium -> small, default), L>C (large -> compact), or the
+cross-model routes C>S and S>C.  For every module of the target library that
+survives whole (tools/survey.py), the source library's module is converted
+(tools/convert.py) and compared with the surviving one byte for byte, every
+record from THEADR to MODEND.  The cross-model routes take the other damaged
+library's module unchanged, and only where the medium and large modules have
+the same code and data bytes (a module that does not depend on the data
+model); the others count as "not applicable".
+Prints per route: exact, differing (with the converter's notes or the first
+differing record), and unsupported (the converter refused, with why).
+-v lists every module.
+"""
+
+import os
+import sys
+from collections import Counter
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import convert  # noqa: E402
+import damage  # noqa: E402
+import omf  # noqa: E402
+import omfrec  # noqa: E402
+import paths  # noqa: E402
+import survey  # noqa: E402
+
+DISKS = {'S': 'DISK4/CLIBS.LIB', 'C': 'DISK4/CLIBC.LIB',
+         'M': 'DISK4/CLIBM.LIB', 'L': 'DISK5/CLIBL.LIB',
+         'H': 'DISK5/CLIBH.LIB'}
+BIG = {'M': 'CLIBM', 'L': 'CLIBL', 'H': 'CLIBH'}
+
+
+def module_bytes(lib, start):
+    raw = lib.module(start)
+    t, b, o = raw[-1]
+    return lib.data[start:o + 3 + len(b) + 1]
+
+
+def first_diff(a, b):
+    """Describe where two record lists first differ."""
+    for n, (x, y) in enumerate(zip(a, b)):
+        if x != y:
+            return '%s#%d' % (omf.NAMES.get(x['type'] & 0xFE,
+                                            '%02X' % x['type']), n)
+    return 'record-count %d/%d' % (len(a), len(b))
+
+
+def classify_diff(got, want):
+    """Rough reason for a mismatch."""
+    gt = [r['type'] for r in got]
+    wt = [r['type'] for r in want]
+    if gt != wt:
+        return 'record-layout'
+    for x, y in zip(got, want):
+        if x == y:
+            continue
+        t = x['type']
+        if t == 0x98:
+            if x['length'] != y['length']:
+                return 'code-length'
+            return 'segdef'
+        if t == 0xA0:
+            if len(x['data']) != len(y['data']):
+                return 'ledata-length'
+            return 'code-bytes'
+        if t == 0x9C:
+            return 'fixupp'
+        return omf.NAMES.get(t & 0xFE, '%02X' % t)
+    return 'same-records?'
+
+
+def code_bytes(lib, start):
+    """Every LEDATA/LIDATA's bytes, in order (code and data)."""
+    return b''.join(r['data'] for r in omfrec.decode_module(lib.module(start))
+                    if r['type'] in (0xA0, 0xA2))
+
+
+def score_cross(dm, src, dst, verbose, zpath=None):
+    mlib = paths.library('M', zpath)
+    llib = paths.library('L', zpath)
+    libs = {}
+    for k in (src, dst):
+        data, bad = dm[DISKS[k]]
+        libs[k] = (survey.lib_from_bytes(data), bad)
+
+    def whole(k, i):
+        lib, bad = libs[k]
+        a, b = lib.span(lib.starts[i])
+        return survey.genuine_bytes(a, b, bad) == b - a and \
+            lib.module(lib.starts[i])
+    res = Counter()
+    rows = []
+    for i in range(len(mlib.starts)):
+        if not whole(dst, i):
+            continue
+        tl, sl = libs[dst][0], libs[src][0]
+        name = omf.theadr(tl.module(tl.starts[i]))
+        if not whole(src, i):
+            res['source lost'] += 1
+            continue
+        if code_bytes(mlib, mlib.starts[i]) != \
+                code_bytes(llib, llib.starts[i]):
+            res['not applicable'] += 1
+            continue
+        same = module_bytes(tl, tl.starts[i]) == module_bytes(sl,
+                                                              sl.starts[i])
+        res['exact' if same else 'differ'] += 1
+        rows.append((i, name, 'exact' if same else 'differ', ''))
+    print('%s>%s: %s' % (src, dst, ', '.join('%s %d' % kv
+                                             for kv in sorted(res.items()))))
+    if verbose:
+        for row in rows:
+            print('  %3d %-10s %-11s %s' % row)
+    return rows
+
+
+def score(zpath, src, dst, verbose, dm=None):
+    dm = dm or damage.damage_map(zpath, [DISKS['S'], DISKS['C']])
+    if src in 'SC':
+        return score_cross(dm, src, dst, verbose, zpath)
+    data, bad = dm[DISKS[dst]]
+    tlib = survey.lib_from_bytes(data)
+    slib = paths.library(src, zpath)
+    res = Counter()
+    why = Counter()
+    rows = []
+    for n, (ts, ss) in enumerate(zip(tlib.starts, slib.starts)):
+        a, b = tlib.span(ts)
+        if survey.genuine_bytes(a, b, bad) != b - a or not tlib.module(ts):
+            continue
+        name = omf.theadr(tlib.module(ts))
+        want = omfrec.decode_module(tlib.module(ts))
+        srec = omfrec.decode_module(slib.module(ss))
+        try:
+            got, notes = convert.convert(srec, BIG[src])
+        except convert.Unsupported as e:
+            res['unsupported'] += 1
+            r = str(e).split('@')[0].split(':')[0]
+            why['unsupported: ' + r] += 1
+            rows.append((n, name, 'unsupported', str(e)))
+            continue
+        gb = omfrec.module_bytes(got)
+        wb = module_bytes(tlib, ts)
+        if gb == wb:
+            res['exact'] += 1
+            rows.append((n, name, 'exact', ' '.join(notes)))
+        else:
+            res['differ'] += 1
+            c = classify_diff(got, want)
+            tag = ('noted ' + ','.join(sorted({x.split('@')[0]
+                                               for x in notes}))) \
+                if notes else c
+            why['differ: ' + tag] += 1
+            rows.append((n, name, 'differ', '%s %s' % (c, ' '.join(notes))))
+    total = sum(res.values())
+    print('%s>%s: %d surviving modules: exact %d, differ %d, unsupported %d'
+          % (src, dst, total, res['exact'], res['differ'],
+             res['unsupported']))
+    for k, v in sorted(why.items(), key=lambda kv: -kv[1]):
+        print('  %3d %s' % (v, k))
+    if verbose:
+        for row in rows:
+            print('  %3d %-10s %-11s %s' % row)
+    return rows
+
+
+def main(argv):
+    args = argv[1:]
+    zpath = args.pop(0) if args and args[0].lower().endswith('.zip') \
+        else None
+    zpath = paths.check_zip(zpath)
+    verbose = '-v' in args
+    routes = [a for a in args if '>' in a] or ['M>S']
+    dm = damage.damage_map(zpath, [DISKS['S'], DISKS['C']])
+    for r in routes:
+        src, dst = r.split('>')
+        score(zpath, src, dst, verbose, dm)
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))

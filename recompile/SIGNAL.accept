@@ -1,0 +1,6 @@
+medium
+M and L differ from the libraries in one place only: in signal() the table
+index is computed in BX (sig kept in SI) where the libraries compute it in
+SI; every other byte matches.  No source form tried changes this register
+choice; the library may have been built with a slightly different compiler
+revision.  The S and C objects are the same source compiled /ms and /mc.
