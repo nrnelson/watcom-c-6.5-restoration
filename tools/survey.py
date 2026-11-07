@@ -39,7 +39,8 @@ def genuine_bytes(start, end, bad):
 
 
 def survey(lib, bad):
-    """[(start, end, first public name, status, genuine bytes)]"""
+    """[(start, end, module name (dictionary, with '!'), status, genuine
+    bytes)]"""
     out = []
     for s in lib.starts:
         a, b = lib.span(s)
@@ -51,7 +52,9 @@ def survey(lib, bad):
             status = 'lost'
         else:
             status = 'partial'
-        out.append((a, b, sorted(lib.names[s])[0], status, g))
+        mod = [n for n in lib.names[s] if n.endswith('!')]
+        out.append((a, b, mod[0] if mod else sorted(lib.names[s])[0],
+                    status, g))
     return out
 
 

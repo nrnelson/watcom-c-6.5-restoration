@@ -1,6 +1,6 @@
 """score.py - score the converter on the surviving small-code modules.
 
-usage: python3 -I tools/score.py [ZIP] [ROUTE ...] [-v]
+usage: python3 -I tools/score.py [ZIP] [ROUTE ...] [-v] [--check]
 
 ROUTE is M>S (medium -> small, default), L>C (large -> compact), or the
 cross-model routes C>S and S>C.  For every module of the target library that
@@ -13,6 +13,12 @@ model); the others count as "not applicable".
 Prints per route: exact, differing (with the converter's notes or the first
 differing record), and unsupported (the converter refused, with why).
 -v lists every module.
+
+--check (routes M>S and L>C) is the regression test to run after any change
+to the converter: each route must score exactly the population of
+SURVIVORS, none unsupported, and differ on exactly the modules of
+EXPECTED_DIFFER, so every other survivor is exact.  Exit status 1 on any
+deviation; otherwise it prints "score unchanged".
 """
 
 import os
@@ -32,6 +38,14 @@ DISKS = {'S': 'DISK4/CLIBS.LIB', 'C': 'DISK4/CLIBC.LIB',
          'M': 'DISK4/CLIBM.LIB', 'L': 'DISK5/CLIBL.LIB',
          'H': 'DISK5/CLIBH.LIB'}
 BIG = {'M': 'CLIBM', 'L': 'CLIBL', 'H': 'CLIBH'}
+# the measured score (METHOD.md section 8), frozen for --check
+SURVIVORS = {'M>S': 106, 'L>C': 102}
+EXPECTED_DIFFER = {
+    'M>S': {'exit', 'atexit', 'OVLLDR', 'TZSET', 'QSORT', 'PRTF', 'PRINTF',
+            'BSEARCH', 'ASCTIME'},
+    'L>C': {'exit', 'atexit', 'OVLLDR', 'QSORT', 'PRTF', 'PRINTF',
+            'IOALLOC', 'FWRITE', 'BSEARCH'},
+}
 
 
 def module_bytes(lib, start):
@@ -174,11 +188,34 @@ def main(argv):
         else None
     zpath = paths.check_zip(zpath)
     verbose = '-v' in args
+    check = '--check' in args
     routes = [a for a in args if '>' in a] or ['M>S']
     dm = damage.damage_map(zpath, [DISKS['S'], DISKS['C']])
+    bad = []
     for r in routes:
         src, dst = r.split('>')
-        score(zpath, src, dst, verbose, dm)
+        rows = score(zpath, src, dst, verbose, dm)
+        if not check:
+            continue
+        if r not in EXPECTED_DIFFER:
+            bad.append('%s: no frozen score to check against' % r)
+            continue
+        if len(rows) != SURVIVORS[r]:
+            bad.append('%s: %d surviving modules scored, expected %d' % (
+                r, len(rows), SURVIVORS[r]))
+        uns = sorted(row[1] for row in rows if row[2] == 'unsupported')
+        if uns:
+            bad.append('%s: unsupported %s' % (r, ' '.join(uns)))
+        differ = {row[1] for row in rows if row[2] == 'differ'}
+        if differ != EXPECTED_DIFFER[r]:
+            bad.append('%s: now differ %s; no longer differ %s' % (
+                r, sorted(differ - EXPECTED_DIFFER[r]),
+                sorted(EXPECTED_DIFFER[r] - differ)))
+    if check:
+        for b in bad:
+            print('CHECK FAILED: ' + b)
+        print('score unchanged' if not bad else 'score CHANGED')
+        return 1 if bad else 0
     return 0
 
 

@@ -179,17 +179,67 @@ def returns_near(code, start, insns):
     return kinds == {'near'}
 
 
-def frame_thresholds(code, order, starts, asm_entries=None, insns=None):
+def interrupt_stubs(code, order, insns):
+    """{call offset: (callee, retf offset)} for every INT emulated in
+    inline assembly: pushf; push cs; call near L, where L pushes the vector
+    and jumps to it with the first RETF at or after L (which stays)."""
+    out = {}
+    for x in order:
+        if x.op == 0x0E and code[x.off - 1:x.off] == b'\x9c' and \
+                x.off + 1 in insns and insns[x.off + 1].op == 0xE8:
+            callee = insns[x.off + 1].target(code)
+            for y in order:
+                if y.off >= callee and y.kind == x86.RETF:
+                    out[x.off + 1] = (callee, y.off)
+                    break
+    return out
+
+
+POPS = set(range(0x58, 0x60)) | {0x07, 0x17, 0x1F, 0x9D}
+
+
+def imm_value(code, x):
+    """The immediate of x, an 8-bit one sign-extended."""
+    n = code[x.imm] if x.immsz == 1 else code[x.imm] | code[x.imm + 1] << 8
+    if x.immsz == 1 and n > 127:
+        n -= 256
+    return n
+
+
+def writes_bp(x):
+    """True when x writes BP other than by pop bp (mov, xchg, lea, lds/les,
+    inc/dec, arithmetic with BP as destination)."""
+    op = x.op
+    return (op == 0x8B and x.reg == 5) or \
+        (op == 0x89 and x.mod == 3 and x.rm == 5) or \
+        (op == 0x87 and (x.reg == 5 or (x.mod == 3 and x.rm == 5))) or \
+        op in (0x95, 0xBD, 0x45, 0x4D) or \
+        (op in (0x8D, 0xC4, 0xC5) and x.reg == 5) or \
+        (op in (0x81, 0x83) and x.mod == 3 and x.rm == 5 and x.reg != 7)
+
+
+def frame_thresholds(code, order, starts, asm_entries=None, insns=None,
+                     stubs=None):
     """{insn start: bp displacement of the return address} for every
     instruction inside a bp frame (None outside).  With asm_entries
     (assembler modules, where bp is often a plain register) only a
-    'push bp; mov bp,sp' that opens one of those entry points counts."""
+    'push bp; mov bp,sp' that opens one of those entry points counts.
+
+    In compiled C (METHOD.md 7.3) BP is followed through the function in
+    address order: the stub of an emulated INT (stubs, from
+    interrupt_stubs) is inline code of the same function, and pushf; push
+    cs; call with the stub is stack-neutral.  The stack depth below the
+    frame is counted through pushes, pops, add/sub sp,n and mov sp,bp; a
+    push bp while BP is the frame pointer records where the frame BP was
+    saved; any other write to BP repurposes it (its [bp+d] are left alone)
+    until a pop bp at the saved depth restores the frame.  A pop bp with no
+    frame BP saved is the epilogue."""
     th = {}
     cur = None
-    for n, x in enumerate(order):
-        if x.off in starts:
-            cur = None
-        if asm_entries is not None:
+    if asm_entries is not None:
+        for x in order:
+            if x.off in starts:
+                cur = None
             if x.off in asm_entries and x.op == 0x55 and \
                     code[x.off + 1:x.off + 3] in (b'\x89\xe5', b'\x8b\xec'):
                 cur = 2
@@ -197,9 +247,22 @@ def frame_thresholds(code, order, starts, asm_entries=None, insns=None):
                     code[x.off:x.off + 2] in (b'\x89\xe5', b'\x8b\xec'):
                 cur = 0         # mov bp,sp at the entry: bp+0 is the return
             th[x.off] = cur
-            continue
+        return th
+    if stubs is None:
+        stubs = interrupt_stubs(code, order, insns)
+    callees = {c for c, r in stubs.values()}
+    inert = set()           # pushf; push cs; call; and the stub itself
+    for call, (callee, retf) in stubs.items():
+        inert.update((call - 2, call - 1, call))
+        inert.update(x.off for x in order if callee <= x.off <= retf)
+    bp_frame, depth, saved, frame_mov = False, 0, None, None
+    for n, x in enumerate(order):
+        if x.off in starts and x.off not in callees:
+            cur, bp_frame, depth, saved = None, False, 0, None
         if x.op == 0x55 and \
                 code[x.off + 1:x.off + 3] in (b'\x89\xe5', b'\x8b\xec'):
+            bp_frame, depth, saved = True, 0, None
+            frame_mov = x.off + 1
             if returns_near(code, x.off, insns):
                 # a near (static) function: same return address in both
                 # code models, nothing to adjust
@@ -216,7 +279,35 @@ def frame_thresholds(code, order, starts, asm_entries=None, insns=None):
                     break
                 m -= 1
             cur = 2 + 2 * k
-        th[x.off] = cur
+            th[x.off] = cur
+            continue
+        if cur is None:
+            th[x.off] = None
+            continue
+        th[x.off] = cur if bp_frame else None
+        if x.off in inert or x.off == frame_mov:
+            continue
+        op = x.op
+        if op in PUSHES or op == 0x9C or (op == 0xFF and x.reg == 6):
+            depth += 1
+            if op == 0x55 and bp_frame:
+                saved = depth
+        elif op == 0x5D:
+            if saved is not None:
+                bp_frame = depth == saved
+                if bp_frame:
+                    saved = None
+            depth -= 1
+        elif op in POPS or (op == 0x8F and x.reg == 0):
+            depth -= 1
+        elif op in (0x81, 0x83) and x.mod == 3 and x.rm == 4 and \
+                x.reg in (0, 5):
+            v = imm_value(code, x)
+            depth += (-v if x.reg == 0 else v) // 2
+        elif code[x.off:x.off + 2] in (b'\x89\xec', b'\x8b\xe5'):
+            depth = 0
+        elif writes_bp(x):
+            bp_frame = False
     return th
 
 
@@ -529,8 +620,9 @@ def convert_code(code, fixups, entries, notes, frames=True,
     for x in order:
         if x.kind == x86.CALL_NEAR and x.rel not in fixat:
             starts.add(x.target(code))
+    stubs = interrupt_stubs(code, order, insns)
     th = frame_thresholds(code, order, starts,
-                          None if frames else set(entries), insns)
+                          None if frames else set(entries), insns, stubs)
     targets = set(entries)
     for x in order:
         if x.rel is not None and x.rel not in fixat and \
@@ -541,15 +633,9 @@ def convert_code(code, fixups, entries, notes, frames=True,
     # pushes the vector and jumps to it with RETF, which stays
     bounds = sorted(targets | starts)
     keep_retf = set()
-    for x in order:
-        if x.op == 0x0E and code[x.off - 1:x.off] == b'\x9c' and \
-                x.off + 1 in insns and insns[x.off + 1].op == 0xE8:
-            callee = insns[x.off + 1].target(code)
-            for y in order:
-                if y.off >= callee and y.kind == x86.RETF:
-                    keep_retf.add(y.off)
-                    notes.append('interrupt-call-kept@%04X' % x.off)
-                    break
+    for call in sorted(stubs):
+        keep_retf.add(stubs[call][1])
+        notes.append('interrupt-call-kept@%04X' % (call - 1))
     # RETF used as a far jump: the block before it pushed a segment and an
     # offset (or switched stacks) that it consumes; it stays RETF
     for n, x in enumerate(order):

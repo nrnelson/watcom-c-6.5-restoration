@@ -1,0 +1,158 @@
+"""exematch.py - find rebuilt library code in the archive's own programs.
+
+usage: python3 -I tools/exematch.py [ZIP] [OUTDIR]
+
+The programs shipped with Watcom C 6.5 (the .EXE and .COM files in the zip)
+were linked with its libraries, mostly the small-model one.  For every
+`inferred` module of OUTDIR/CLIBS.LIB and OUTDIR/CLIBC.LIB (default out/,
+rows from OUTDIR/PROVENANCE.csv) whose code is one fully populated CODE
+segment (LEDATA only) with at least MIN_LITERAL bytes outside fixup fields,
+the code is searched for in each program's load image (after the MZ
+header): every byte that is not a fixup field must match at one contiguous
+location.  Fixup fields are masked because the linker fills them.
+
+Prints CSV: library, module, code bytes, literal bytes, and the matches as
+FILE@hex file offset.  A match corroborates the module's instruction bytes
+only: not its data, its records, or where its relocations point.  The
+modules stay classified `inferred` (METHOD.md, section 17).
+"""
+
+import csv
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import omf  # noqa: E402
+import omfrec  # noqa: E402
+import paths  # noqa: E402
+
+MIN_LITERAL = 20
+FIXUP_SIZE = {0: 1, 1: 2, 2: 2, 3: 4, 4: 1}
+
+
+def code_and_mask(recs):
+    """(code bytes, mask) of the module's single CODE segment, mask[i] true
+    where a fixup field lies; None when the module has no single fully
+    populated LEDATA code segment."""
+    names = [n for r in recs if r['type'] == 0x96 for n in r['names']]
+    segs = [r for r in recs if r['type'] == 0x98]
+    code_segs = [i for i, r in enumerate(segs, 1)
+                 if r['cls'] and names[r['cls'] - 1] == 'CODE']
+    if len(code_segs) != 1:
+        return None
+    seg = code_segs[0]
+    n = segs[seg - 1]['length']
+    code = bytearray(n)
+    have = bytearray(n)
+    mask = bytearray(n)
+    last = None
+    for r in recs:
+        if r['type'] in (0xA0, 0xA2):
+            last = r
+            if r['seg'] != seg:
+                continue
+            if r['type'] == 0xA2:
+                return None
+            code[r['off']:r['off'] + len(r['data'])] = r['data']
+            have[r['off']:r['off'] + len(r['data'])] = b'\1' * len(r['data'])
+        elif r['type'] == 0x9C and last is not None and last['seg'] == seg:
+            for f in r['subs']:
+                if f['kind'] != 'fixup':
+                    return None
+                p = last['off'] + f['at']
+                k = FIXUP_SIZE[f['loc']]
+                mask[p:p + k] = b'\1' * k
+    if not all(have):
+        return None
+    return bytes(code), bytes(mask)
+
+
+def runs(code, mask):
+    """[(offset, bytes)] of the runs of unmasked bytes."""
+    out = []
+    i = 0
+    while i < len(code):
+        if mask[i]:
+            i += 1
+            continue
+        j = i
+        while j < len(code) and not mask[j]:
+            j += 1
+        out.append((i, code[i:j]))
+        i = j
+    return out
+
+
+def images(zpath):
+    """{file name: (first byte of the load image, bytes up to its end)} of
+    every .EXE and .COM in the zip."""
+    out = {}
+    for name, data in sorted(paths.zip_files(zpath).items()):
+        if not name.upper().endswith(('.EXE', '.COM')):
+            continue
+        first = 0
+        if data[:2] == b'MZ':
+            last_page = data[2] | data[3] << 8
+            pages = data[4] | data[5] << 8
+            end = (pages - 1) * 512 + (last_page or 512)
+            first = (data[8] | data[9] << 8) * 16
+            data = data[:end]
+        out[name] = (first, data)
+    return out
+
+
+def find(code, lits, imgs):
+    """Matches of the literal runs at one contiguous place: [name@hex]."""
+    at, anchor = max(lits, key=lambda x: len(x[1]))
+    hits = []
+    for name, (first, data) in imgs.items():
+        h = data.find(anchor, first)
+        while h >= 0:
+            s = h - at
+            if s >= first and s + len(code) <= len(data) and \
+                    all(data[s + o:s + o + len(b)] == b for o, b in lits):
+                hits.append('%s@%x' % (name, s))
+            h = data.find(anchor, h + 1)
+    return hits
+
+
+def main(argv):
+    args = argv[1:]
+    zpath = args.pop(0) if args and args[0].lower().endswith('.zip') \
+        else None
+    zpath = paths.check_zip(zpath)
+    outdir = args[0] if args else paths.OUT
+    imgs = images(zpath)
+    with open(os.path.join(outdir, 'PROVENANCE.csv'), newline='') as f:
+        rows = list(csv.DictReader(f))
+    w = csv.writer(sys.stdout, lineterminator='\n')
+    w.writerow(['library', 'module', 'code_bytes', 'literal_bytes',
+                'matches'])
+    count = {}
+    for k in 'SC':
+        lib = omf.Lib(os.path.join(outdir, 'CLIB%s.LIB' % k))
+        for row in rows:
+            if row['lib'] != 'CLIB' + k or row['status'] != 'inferred':
+                continue
+            got = code_and_mask(omfrec.decode_module(
+                lib.module(int(row['offset']))))
+            if got is None:
+                continue
+            code, mask = got
+            lits = runs(code, mask)
+            nlit = sum(len(b) for o, b in lits)
+            if nlit < MIN_LITERAL:
+                continue
+            hits = find(code, lits, imgs)
+            if hits:
+                count[k] = count.get(k, 0) + 1
+                w.writerow([row['lib'], row['module'], len(code), nlit,
+                            ' '.join(hits)])
+    sys.stderr.write('modules found in shipped programs: CLIBS %d, CLIBC %d\n'
+                     % (count.get('S', 0), count.get('C', 0)))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main(sys.argv))

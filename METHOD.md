@@ -32,6 +32,7 @@ Contents
 14. Confidence
 15. Reproducing and checking the work
 16. Open questions
+17. Corroboration from the shipped programs
 
 
 ## 1. Principles
@@ -88,7 +89,9 @@ compact), and small differs from compact only in data pointers.
 - Open Watcom v2 `wdis` (beta, 2026) only to display disassembly while
   investigating; no reconstructed byte depends on it.
 - `tools/checklib.py`, a strict library checker that walks every module
-  and record sequentially instead of trusting the dictionary.
+  and record sequentially instead of trusting the dictionary, then checks
+  the end record and the dictionary against what it found
+  (`tools/selfcheck.py` shows it rejects one-byte damage).
 
 No assembler was used to produce any byte.  Watcom C 6.5 ships no
 assembler; every rebuilt byte comes from the converter, from Watcom C 6.5
@@ -115,7 +118,12 @@ Learned from the five libraries (`tools/omf.py`, `tools/omfrec.py`):
   PUBDEF 90h, LNAMES 96h, SEGDEF 98h, GRPDEF 9Ah, FIXUPP 9Ch, LEDATA A0h,
   LIDATA A2h.  No LINNUM, no FIXUPP threads (every fixup is explicit).  Every
   record carries a valid checksum (a checksum byte of 0 occurs only where
-  the true checksum is 0).
+  the true checksum is 0).  `tools/checklib.py` enforces this: every module
+  record's bytes must sum to 0 mod 256, zero checksum bytes included, and
+  the intact CLIBM, CLIBL and CLIBH and both restored libraries pass.
+- The end record runs exactly up to the dictionary (CLIBS: F1h at 86128,
+  length 397, dictionary at 86528; CLIBC: 91488, 157, 91648), and its
+  payload is all zeros; the dictionary ends the file.
 - COMENT records: class `FF 80` + the source file name as the compiler was
   given it (e.g. `..\c\UNLINK.c`) in every compiled-C module; class `FE 80`
   + `L5MATHM` (a default-library request) only in SCNF.  Assembler modules
@@ -147,7 +155,9 @@ uninformative.
 - A lone unmatched sector between two foreign runs is foreign too.  The
   three such sectors in CLIBS were inspected: one holds 8086 code, one a
   ctype table followed by "Unable to open '%s'", one README-style text
-  about a mouse driver.  None is library content.
+  about a mouse driver.  None is library content.  This is an inference
+  from inspection, not a match: of CLIBS's 96 foreign sectors, 93 match
+  other files' bytes and these 3 match nothing.
 
 **Result.**
 
@@ -166,6 +176,12 @@ CLIBC foreign runs: 11776-22016 DISK4/MATHM.LIB (same offset); 22016-37376
 the last 15360 bytes of DISK4/CLIBM.LIB (its last modules and its
 dictionary, sector-aligned there); 37376-63488 DISK4/CLIBM.LIB (same
 offset).
+
+That is the observation.  How the damage arose is a hypothesis: the
+pattern (whole sectors of other files, mostly at their own offsets) looks
+like a copy made from a hard disk with unreadable sectors, where the
+copying tool left whatever its buffer last held.  Nothing in this method
+depends on that explanation.
 
 **Bit errors inside genuine sectors.**  Two places were found where bytes
 in a sector that is otherwise genuine are wrong:
@@ -339,6 +355,37 @@ Each with the evidence that established it:
   register, so only a frame opened at a public entry counts
   (`push bp; mov bp,sp`, return at bp+2; or `mov bp,sp`, return at bp+0).
   A 16-bit displacement that now fits in 8 bits is shortened.
+
+  In compiled C, BP is followed through the function: within a frame
+  opened by `push bp; mov bp,sp`, BP is followed through the function's
+  straight-line code.  The stub reached by an interrupt-emulation call
+  (`pushf; push cs; call L`, whose RETF is kept, above) is inline code of
+  the same function, not a function entry: it does not end the frame, and
+  the sequence `pushf; push cs; call` together with the stub is
+  stack-neutral (the handler's IRET consumes it).  The stack depth below
+  the frame is counted through pushes, pops, `add/sub sp,n` and `mov
+  sp,bp` (depth 0).  A `push bp` while BP is the frame pointer records the
+  depth at which the frame BP was saved.  Any other write to BP (`mov
+  bp,...`, `xchg`, `lea`, `lds/les bp`, `inc/dec`, arithmetic, `pop bp` at
+  a different depth) means BP is repurposed: `[bp+d]` is then not a frame
+  access and is left alone, until a `pop bp` at the saved depth restores
+  the frame.  A `pop bp` when no frame BP is saved on the stack is the
+  function epilogue and leaves the state unchanged.
+
+  This rule changes two modules, both compact: INT86 (`lds bx,[bp+10h]`
+  after the interrupt becomes `[bp+0Eh]`) and INT86X (`[bp+0Eh]` becomes
+  `[bp+0Ch]`; its `[bp+6]` and `[bp+4]`, read through a temporary BP, are
+  left alone).  Before it, the converter forgot the frame at the stub and
+  left the reload unadjusted (section 13).  It only re-labels INTDOSX in
+  both libraries: its bytes are unchanged, but its accesses through a
+  temporary BP are no longer reported as touching the return address, so
+  its confidence is `medium`, resting on this corrected frame
+  interpretation; both INTDOSX rows stay `inferred` with no genuine bytes.
+  The analysis follows instructions in address order, ignoring branches;
+  that is exact for the straight-line inline code it exists for, and it is
+  validated on this corpus (the survivor score of section 8 is unchanged,
+  and the three inline-assembly modules INT86, INT86X and INTDOSX come out
+  as traced by hand), not proven for arbitrary control flow.
 - **Stack check size**: `mov ax,N; call __STK` at the start of a far
   function: N-2.  From PRTF (small 72 vs medium 76: -4, because `_prtf` also
   takes a code pointer argument) and the surviving part of CLIBC SCNF
@@ -445,14 +492,30 @@ overlapping instructions 2/2; guessed code 8/10; far entry thunk 2/3; code
 pointer constructs (indirect far calls through tables, far code pointers in
 data, code offsets in data) 0/12.
 
-These numbers are measured on the same modules the rules were developed
-on, so they are optimistic for the lost modules.  The one independent check
-is CLIBC SCNF (section 10).
+These numbers are development-set measurements: the rules were tuned on
+these same modules, so they are optimistic for the lost modules.  The
+strongest further constraint is CLIBC SCNF (section 10), and it is not
+independent either.  `python3 -I tools/score.py 'M>S' 'L>C' --check`
+freezes the scores as a regression test: it fails unless both routes score
+exactly these populations, with no module unsupported and exactly the
+differing modules listed above.
 
 
 ## 9. The recompile route
 
-Tool: `tools/recompile.py`; sources in `recompile/`.
+Tool: `tools/recompile.py`; sources in `recompile/` (described in
+`recompile/README.md`).  By role:
+
+| source | role |
+|---|---|
+| `PRINTF.c` | validation case: reproduces all five libraries; the surviving S and C modules are kept, so its objects are not needed |
+| `SPRINTF.c` | supplies the rebuilt small and compact modules |
+| `SETJMP.py` | supplies them; generates the C source, whose far bodies are read from the user's CLIBM and CLIBL and whose near variants are explicit edits |
+| `SIGNAL.c` | supplies them, accepted near-exact (decision 2) |
+| `FMALLOC.c`, `SPAWNVE.c` | attempts, not reproduced, not used |
+
+Each `.opt` file holds the switches that make 6.5 reproduce the module,
+not Watcom's own build line, which is unknown.
 
 For modules the converter cannot do (code pointers), C source was written
 by reading the CLIBM and CLIBL machine code, and compiled by Watcom C 6.5
@@ -491,6 +554,10 @@ Findings that came out of this work:
   and large differ from the library in one register choice in `signal`
   (the table index in BX instead of SI); dozens of source variants and the
   other code generator did not change it.  Accepted, see decision 2.
+  `recompile/SIGNAL.accept` pins the SHA-256 of all five objects this
+  source gives, so a changed source, even one whose change shows only in
+  the small and compact objects, is not accepted; and `rebuild.py` uses an
+  object only when `recompile.py`'s status file vouches for its SHA-256.
 - **FMALLOC, SPAWNVE**: attempted; close (FMALLOC about 75% of the disassembly
   equal, SPAWNVE a few register choices off) but not reproduced; not used.  SPAWNVE's attempt showed `__dospawn`
   takes near pointers in every model and `_execaddr` returns a far
@@ -511,46 +578,61 @@ For each of the 250 modules of each library:
    repair (`original-repaired`).
 2. Otherwise candidates are built, in this order of preference:
    **recompile** (objects written by `recompile.py` for reproduced or
-   accepted sources), **cross** (the other damaged library's surviving
-   module, when CLIBM and CLIBL are identical), **convert**, **unchanged**
-   (CLIBM's module as it is, for the one model-independent routine).
+   accepted sources), **unchanged** (CLIBM's module as it is, for the one
+   model-independent routine), **cross** (the other damaged library's
+   surviving module, when CLIBM and CLIBL are identical), **convert**.  The
+   order matters where more than one fits: EXECADDR fits both unchanged
+   and convert, and decision 3 is to take it unchanged.
 3. A candidate is accepted only if, placed at the dictionary's page and
    padded with zeros, it (a) fills the page span exactly (fewer than 16
-   bytes of padding), (b) equals every surviving genuine byte in the span,
-   (c) has exactly the public names the dictionary lists for that page.
+   bytes of padding) and (b) equals every surviving genuine byte in the
+   span.  The first that passes is chosen.
 4. The chosen module is written; the others are recorded as agreeing or
-   disagreeing.
+   disagreeing.  Then (c) the chosen module's THEADR name and public names
+   must be exactly the names the dictionary lists for that page; a
+   mismatch fails the module (it is not a reason to try another
+   candidate; none has occurred).  Any failed module makes `rebuild.py`
+   exit with status 1.
 
 Then the library is checked as a whole: every genuine byte of the damaged
 file is unchanged (apart from the repairs), and the original header, end
 record and dictionary are kept.  Both libraries pass `tools/checklib.py`,
-which walks the modules sequentially (a stricter check than the
-dictionary, see section 13).
+which walks the modules sequentially, checks every record checksum, the
+end record and the dictionary names (a stricter check than the
+dictionary alone, see section 13).
 
 Results: CLIBS 106 original + TELL repaired, 2 anchored, 141 inferred
 (convert 138, recompile 3, cross 1, unchanged 1).  CLIBC 102 original, 2
 anchored, 146 inferred (convert 142, recompile 3, cross 2, unchanged 1).
 
-**The independent check: CLIBC SCNF.**  SCNF is CLIBC's largest partly
+**The strongest constraint: CLIBC SCNF.**  SCNF is CLIBC's largest partly
 surviving module: 3088 of its 3424 bytes are genuine (only the header and
 the first code bytes are lost).  It was the test that found three rules
 (cross-jumping between far and near exits, near static functions keeping
 their frames, the stack-check size), none of which changes any surviving
-module's result; with them, the converted module matches all 3088 surviving bytes.
+module's result; with them, the converted module matches all 3088
+surviving bytes.  Because those rules were found on it, it constrains the
+converter strongly but is not an independent prediction.
 
 **Confidence levels** in the provenance: `high` = recompiled with CLIBM and
 CLIBL exact, or the cross route; `medium` = converted with no risky note,
 or a near-exact recompile; `low` = converted through code-pointer
 constructs, or depending on a decision.  Low in both libraries: SPAWNVE,
-EXECADDR, DOINTR, DOEXEC, INTDOSX, INT86, INT86X, SETVBUF.
+EXECADDR, DOINTR, DOEXEC, INT86, INT86X, SETVBUF.
 
 
 ## 11. Decisions, with the evidence for each
 
 1. **Three genuine bytes repaired** (section 4): CLIBS 14012 `4C`→`6C`;
-   CLIBC 11580-11581 `D0 81`→`D1 D1`.  Evidence: a failing checksum and
-   the dictionary (TELL); the other four libraries and the instruction
-   stream (AMODF).
+   CLIBC 11580-11581 `D0 81`→`D1 D1`.  The two repairs rest on different
+   evidence.  TELL's on a failing record checksum and the dictionary's
+   spelling of the public name, both of which the repair satisfies.
+   AMODF's on the sibling libraries (CLIBS, CLIBM, CLIBL and CLIBH all
+   have `D1 D1` there) and the instruction stream, in a record that runs
+   into a foreign sector and so cannot be checksummed.  Both are recorded
+   in the provenance notes of every row whose span holds them, and the
+   compact TELL, which is taken from the repaired small one, is marked
+   `cross-from-repaired`.
 2. **SIGNAL accepted near-exact** (section 9).  The single register
    difference in medium and large, together with SPRINTF's in huge,
    suggests the libraries were built by a slightly different compiler
@@ -578,7 +660,10 @@ Tool: `tools/difftest.py`; programs in `tests/`.  Each program is compiled
 by 6.5 in the small, compact, medium and large models and linked by
 WLINK 4.1: small and compact against the rebuilt libraries, medium and
 large against the intact originals.  Each runs in its own DOSBox-X
-instance; the four outputs must be identical.  All five agree:
+instance.  Each run must finish in the emulator, the batch file records
+the program's exit status and a completion marker, and the status must be
+the expected one (3 for T_SPAWN, 0 for the others); then the four outputs
+must be identical.  All six agree:
 
 - T_STR: string and memory functions, ctype, atoi/atol/strtol/strtoul,
   itoa/ltoa/ultoa, div/ldiv, rand, qsort, bsearch, many printf/sprintf/
@@ -593,11 +678,18 @@ instance; the four outputs must be identical.  All five agree:
   raise, malloc/free/realloc/calloc, _fmalloc/_ffree, halloc/hfree,
   putenv/getenv, intdos, stackavail, atexit order.
 - T_SPAWN: spawnl and spawnlp (P_WAIT), a missing program, execl.
+- T_INT: int86, int86x, intdos and intdosx with a failing DOS call (close
+  handle FFFFh: AX=6, carry set, return value 6, as the intact medium and
+  large libraries give), a succeeding one (close a real handle) and the
+  DOS version call, every register printed; it exits 1 if a promised value
+  is wrong.  With the pre-audit CLIBC its compact build fails.
 
 Faults these tests found in earlier versions of the rebuild, all fixed:
 SCNF's default-library request (small programs linked MATHM.LIB);
 EXECVE's far call through the near `_int23_exit` (exec crashed); the
-DOSPAWN hypothesis (spawn crashed, section 13).
+DOSPAWN hypothesis (spawn crashed, section 13).  The compact `int86`/
+`int86x` fault (section 13) was not found by these tests but by the
+audit; T_INT was added for it.
 
 ## 13. Hypotheses that failed, and dead ends
 
@@ -608,7 +700,19 @@ DOSPAWN hypothesis (spawn crashed, section 13).
 - **An undersize module** (SPAWNVE one byte short, leaving an extra page of
   zeros): WLINK would accept it (it finds modules through the dictionary),
   but a strict checker walks modules sequentially and stops at the zero
-  page.  Rejected: every module must fill its span.
+  page.  Rejected: every module must fill its span.  A fallback that still
+  accepted such a module when nothing else fitted remained in
+  `rebuild.py` (no published module used it); it was removed after the
+  audit.
+- **The frame ended at the inline interrupt stub** (a defect found by the
+  November 2026 audit).  The frame analysis treated every near-call
+  target as a new function and forgot the frame there, including the stub
+  that `pushf; push cs; call` reaches in INT86 and INT86X.  In compact
+  those modules then reloaded their output pointer from the wrong offset
+  after the interrupt, so a failing DOS call came back with carry clear
+  and a wrong return value.  Small was unaffected (medium keeps that
+  pointer at a negative offset).  Corrected by following BP through the
+  stub (section 7.3).
 - **A "RETF used as a jump" rule that counted `mov sp,bp` as a stack
   switch**: it turned normal epilogues into jumps and broke 17 surviving small modules;
   corrected (section 7.3).
@@ -621,29 +725,49 @@ DOSPAWN hypothesis (spawn crashed, section 13).
 - **WCGL.EXE** in place of WCG.EXE: different output, no closer.
 - **Local declaration order** for register allocation: no effect.
 - **Iterated jump sizing**: no better than one pass.
-- **WCEXPL.LIB** (WATCOM Express): the medium library plus Express's own
-  modules; no small-code modules.
+- **WCEXPL.LIB** (WATCOM Express): 591 modules; 241 of CLIBM's 250 appear
+  in it byte for byte, 7 are absent by name (WRITE, READ, QREAD, MIN, MAX,
+  SIGNAL, FTOSX) and 2 same-named ones differ (GETCTIME, D2TTIME).  None
+  carries `_small_code_`; of the 35 with a code segment named `_TEXT`, 28
+  are byte-identical to CLIBM's assembler modules of the same name and 7
+  are 8087 math modules.  The search found no small-model donor there.
 
 
 ## 14. Confidence
 
-An estimate, not a measurement (for lost modules nothing survives to check
-against):
+This is my estimate, a judgment and not a measurement: for lost modules
+nothing survives to check against.  It is a weighted count.  The counts
+are from `PROVENANCE.csv`; the weights are my own judgment, with no
+measured basis behind them: originals certain (1); medium-confidence
+rebuilt modules 0.88-0.93 each (from 96.5% exact on survivors, discounted
+for having been tuned on them, for hidden small-model source conditionals
+like PRINTF's, and for padding bytes); high-confidence modules 0.80;
+low-confidence ones 0.30.
 
-| | CLIBS | CLIBC |
-|---|---|---|
-| modules expected byte-identical | about 92-94% (230-235 of 250) | about 90-93% (225-232 of 250) |
-| bytes expected identical | about 98% | about 97-98% |
-| whole library byte-identical | close to 0% | close to 0% |
+| group | weight | CLIBS count | CLIBS expected | CLIBC count | CLIBC expected |
+|---|---|---|---|---|---|
+| original | 1 | 107 | 107 | 102 | 102 |
+| medium | 0.88-0.93 | 133 | 117.0-123.7 | 137 | 120.6-127.4 |
+| high | 0.80 | 3 | 2.4 | 4 | 3.2 |
+| low | 0.30 | 7 | 2.1 | 7 | 2.1 |
+| **modules expected byte-identical** | | 250 | **228.5-235.2 (91-94%)** | 250 | **227.9-234.7 (91-94%)** |
 
-Basis: the original modules (107/102) are certain; the medium-confidence
-rebuilt modules (132/136) were put at 88-93% each, from 96.5% on survivors
-discounted for having been tuned on them, for hidden small-model source
-conditionals like PRINTF's, and for padding bytes; high-confidence modules
-at about 80%; low-confidence ones at about 30%.  A wrong module usually
-differs in a few bytes, hence the higher byte figure.  Behaviour is better
-than byte identity: every test agrees with the original medium and large
-libraries.
+(The table published before the audit gave 92-94% for CLIBS and 90-93%
+for CLIBC without the arithmetic; the same weights applied to the counts
+of that time give 91.2-93.8% and 90.9-93.6%.  The audit fix moved INTDOSX
+from low to medium in both libraries.)  For bytes I put the figure at about 98% (CLIBS) and
+97-98% (CLIBC), on the view that a wrong module usually differs in a few
+bytes; that too is a judgment.  The chance that either whole library is
+byte-identical is close to zero.
+
+The audit objected to two things, and both objections stand: the
+"high" modules (recompiled with CLIBM and CLIBL exact, or the cross route)
+are weighted below the "medium" ones, which is inconsistent with the
+labels; and a wrong module need not differ in a few bytes only, since a
+single changed instruction length shifts everything after it.  The
+numbers above should be read with that in mind.  Behaviour is better
+evidence than these numbers: every test agrees with the original medium
+and large libraries.
 
 
 ## 15. Reproducing and checking the work
@@ -669,12 +793,32 @@ python3 -I tools/checklib.py out/CLIBS.LIB out/CLIBC.LIB
 python3 -I tools/difftest.py                # section 12
 ```
 
+Regression checks to run after any change to the tools:
+
+```
+python3 -I tools/score.py 'M>S' 'L>C' --check   # converter score unchanged
+python3 -I tools/selfcheck.py                   # the checker still bites
+```
+
+`score.py --check` must print `score unchanged` after any converter
+change.  `selfcheck.py` damages `out/CLIBS.LIB` one byte at a time in
+memory (a record checksum, a dictionary name, the end record's payload and
+its length) and fails unless `checklib.py` rejects each for that reason.
+The test programs include T_INT (section 12), which fails on the
+pre-audit compact library.
+
 Expected results: `out/CLIBS.LIB` SHA-256
 `95100563d6885e7f0eba7c1a96aa0587bdf2fbe9ef8bfbaf73a367f85216b8c0`,
 `out/CLIBC.LIB` SHA-256
-`b53e05b77252a952e0896abc3612846bae2a10f4c584d1fa682e752b6e24bcae`.
+`69e6fe1e9b4e0f2b50e047c24c2678fe564c773ead325356376ddce794d9d58b`
+(before the audit fix of sections 7.3 and 13 it was
+`b53e05b77252a952e0896abc3612846bae2a10f4c584d1fa682e752b6e24bcae`).
 The whole process is deterministic: the same zip gives the same bytes on
 any machine.
+
+DOSBox-X configured as DOS 3.10 is an emulator reporting that version,
+not a booted copy of DOS 3.10.  The audit also ran its `int86`/`int86x`
+probes under Compaq DOS 3.10 booted in QEMU, with the same results.
 
 Ways to check the work independently:
 
@@ -709,7 +853,9 @@ Tools:
 | `tools/recompile.py` | compiles `recompile/NAME.c` in all models and compares |
 | `tools/rebuild.py` | builds `out/CLIBS.LIB`, `out/CLIBC.LIB`, `out/PROVENANCE.csv` |
 | `tools/checklib.py` | strict sequential check of a library |
+| `tools/selfcheck.py` | shows `checklib.py` rejects one-byte damage |
 | `tools/difftest.py` | builds and runs `tests/` in all four models |
+| `tools/exematch.py` | finds rebuilt code in the archive's own programs (section 17) |
 
 
 ## 16. Open questions
@@ -719,7 +865,36 @@ Tools:
 - The exact compiler revision and per-module switches Watcom used; the
   register differences in SIGNAL (medium, large) and SPRINTF (huge).
 - Whether the six lower-case CLIBS modules came from other sources.
-- P_OVERLAY spawn (through the far exec hook) is untested.
+- P_OVERLAY spawn (through the far exec hook) is untested.  The audit's
+  P_OVERLAY probe returned -1 with errno 9 in all four models, so it did
+  not isolate any difference specific to the reconstruction, and the
+  success path of P_OVERLAY remains unverified.
 - More modules could be moved to the recompile route (FMALLOC, SPAWNVE,
   and the code-pointer modules), which would raise their confidence where
   CLIBM and CLIBL can be reproduced exactly.
+
+
+## 17. Corroboration from the shipped programs
+
+Tool: `tools/exematch.py` (added after the November 2026 audit, which
+found this evidence first).
+
+The programs on the distribution disks (`WCL.EXE`, `WMAKE.EXE`,
+`WCPP.EXE` and others) were linked by Watcom with its own libraries,
+mostly the small-model one, so lost library code may survive inside them.
+For every `inferred` module whose code is one fully populated CODE segment
+with at least 20 bytes outside fixup fields, the tool masks the fixup
+fields (the linker fills them) and searches every .EXE and .COM load image
+in the zip for a single contiguous place where all the other code bytes
+match.
+
+Result: the complete reconstructed code of 55 wholly lost small modules
+and 4 compact ones occurs literally in shipped programs (for example small
+SPAWNVE in WCL.EXE and WMAKE.EXE, small SIGNAL in WCPP.EXE); the counts
+and locations agree with the audit's independent implementation.
+
+This corroborates the instruction bytes of those modules only: not their
+data segments, their record layout and other object-file metadata, or
+where their relocations point.  The modules therefore stay classified
+`inferred`, and their confidence is not raised; the tool's output is a
+ledger, not an input to the rebuild.

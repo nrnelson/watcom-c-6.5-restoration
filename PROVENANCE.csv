@@ -81,7 +81,7 @@ CLIBS,78,LOCK,26992,240,0,inferred,convert,medium,,,
 CLIBS,79,KBHIT,27232,208,0,inferred,convert,medium,,,
 CLIBS,80,ISATTY,27440,208,0,inferred,convert,medium,,,
 CLIBS,81,INTR,27648,224,0,inferred,convert,medium,,,
-CLIBS,82,INTDOSX,27872,304,0,inferred,convert,low,,,return-address-access
+CLIBS,82,INTDOSX,27872,304,0,inferred,convert,medium,,,
 CLIBS,83,INTDOS,28176,288,0,inferred,convert,medium,,,
 CLIBS,84,INT86X,28464,288,0,inferred,convert,low,,,interrupt-call-kept
 CLIBS,85,INT86,28752,288,0,inferred,convert,low,,,interrupt-call-kept
@@ -279,14 +279,14 @@ CLIBC,26,FDI4,10640,208,208,original,,original,,,
 CLIBC,27,FDFS,10848,144,144,original,,original,,,
 CLIBC,28,FDC,10992,192,192,original,,original,,,
 CLIBC,29,FCHOP,11184,112,112,original,,original,,,
-CLIBC,30,AMODF,11296,576,480,anchored,cross,high,convert,,
+CLIBC,30,AMODF,11296,576,480,anchored,cross,high,convert,,"byte 11580 D0->D1: AMODF code: D0 81 breaks the instruction stream (shl di,1; rcl cx,1; rcl bx,1 ...); S, M, L and H all have D1 D1 here; byte 11581 81->D1: AMODF code: see byte 11580"
 CLIBC,31,WRITE,11872,592,0,inferred,convert,medium,,,
 CLIBC,32,UTIME,12464,560,0,inferred,convert,medium,,,
 CLIBC,33,UNLOCK,13024,256,0,inferred,convert,medium,,,
 CLIBC,34,UNLINK,13280,224,0,inferred,convert,medium,,,
 CLIBC,35,UNGETCH,13504,224,0,inferred,convert,medium,,,
 CLIBC,36,TZSET,13728,560,0,inferred,convert,medium,,,
-CLIBC,37,TELL,14288,240,0,inferred,cross,high,convert,,
+CLIBC,37,TELL,14288,240,0,inferred,cross,high,convert,,cross-from-repaired
 CLIBC,38,SYSTEM,14528,368,0,inferred,convert,medium,,,
 CLIBC,39,STKSIZE,14896,176,0,inferred,convert,medium,,,
 CLIBC,40,STAT,15072,864,0,inferred,convert,medium,,,overlapping-insns
@@ -331,7 +331,7 @@ CLIBC,78,LOCK,28448,256,0,inferred,convert,medium,,,
 CLIBC,79,KBHIT,28704,224,0,inferred,convert,medium,,,
 CLIBC,80,ISATTY,28928,208,0,inferred,convert,medium,,,
 CLIBC,81,INTR,29136,224,0,inferred,convert,medium,,,
-CLIBC,82,INTDOSX,29360,336,0,inferred,convert,low,,,return-address-access
+CLIBC,82,INTDOSX,29360,336,0,inferred,convert,medium,,,
 CLIBC,83,INTDOS,29696,288,0,inferred,convert,medium,,,
 CLIBC,84,INT86X,29984,320,0,inferred,convert,low,,,interrupt-call-kept
 CLIBC,85,INT86,30304,288,0,inferred,convert,low,,,interrupt-call-kept

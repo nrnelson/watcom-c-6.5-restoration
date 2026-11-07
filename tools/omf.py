@@ -48,10 +48,25 @@ class Lib(object):
                 out.setdefault(page * self.page, []).append(name)
         return out
 
+    def end_of_modules(self):
+        """Offset of the library end record (F1h), which follows the last
+        module's page span."""
+        d = self.data
+        o = self.starts[-1]
+        raw = self.module(o)
+        if raw:
+            t, b, p = raw[-1]
+            o = p + 3 + len(b) + 1
+        while d[o] != 0xF1:
+            o += 1
+        return o
+
     def span(self, start):
-        """(start, end) of the page span the dictionary gives a module."""
+        """(start, end) of the page span the dictionary gives a module; the
+        last module's ends at the end record."""
         i = self.starts.index(start)
-        end = self.starts[i + 1] if i + 1 < len(self.starts) else self.dict_at
+        end = self.starts[i + 1] if i + 1 < len(self.starts) else \
+            self.end_of_modules()
         return start, end
 
     def module(self, start):

@@ -12,7 +12,7 @@ int main( void )
 {
     FILE        *fp;
     char        buf[128];
-    int         h, n, i;
+    int         h, n, i, a1, a2;
     long        pos;
     struct stat st;
 
@@ -41,9 +41,13 @@ int main( void )
     h = creat( "TIO2.BIN", S_IREAD | S_IWRITE );
     n = write( h, "0123456789", 10 ); close( h );
     stat( "TIO2.BIN", &st ); printf( "9 write=%d size=%ld\n", n, st.st_size );
-    printf( "10 access=%d %d\n", access( "TIO2.BIN", 0 ), access( "NOSUCH.ZZZ", 0 ) );
-    rename( "TIO2.BIN", "TIO3.BIN" ); printf( "11 %d %d\n", access( "TIO3.BIN", 0 ),
-                                              remove( "TIO3.BIN" ) );
+    a1 = access( "TIO2.BIN", 0 );
+    a2 = access( "NOSUCH.ZZZ", 0 );
+    printf( "10 access=%d %d\n", a1, a2 );
+    rename( "TIO2.BIN", "TIO3.BIN" );
+    a1 = access( "TIO3.BIN", 0 );
+    a2 = remove( "TIO3.BIN" );
+    printf( "11 %d %d\n", a1, a2 );
     mkdir( "TDIR" ); chdir( "TDIR" ); getcwd( buf, sizeof( buf ) );
     printf( "12 %s\n", strrchr( buf, '\\' ) ); chdir( ".." ); printf( "13 %d\n", rmdir( "TDIR" ) );
     remove( "TIO.TXT" ); remove( "TIO.BIN" );

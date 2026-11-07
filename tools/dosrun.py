@@ -85,7 +85,9 @@ def find_dosbox():
 
 
 def run(work, bat, timeout=300, tooldir=None):
-    """Run BAT in WORK; returns True if DOSBox-X ended before the timeout."""
+    """Run BAT in WORK; returns True if DOSBox-X ended before the timeout
+    with exit status 0, False otherwise (its output is in
+    WORK/DOSBOX.OUT)."""
     work = os.path.abspath(work)
     tool = os.path.abspath(tooldir or paths.WATCOM)
     if not os.path.isfile(os.path.join(tool, 'BIN', 'WCC.EXE')):
@@ -102,13 +104,13 @@ def run(work, bat, timeout=300, tooldir=None):
     env['SDL_AUDIODRIVER'] = 'dummy'
     with open(os.path.join(work, 'DOSBOX.OUT'), 'w') as out:
         try:
-            subprocess.run([find_dosbox(), '-conf', conf, '-nogui',
-                            '-nomenu', '-exit'], stdout=out,
-                           stderr=subprocess.STDOUT, env=env,
-                           timeout=timeout)
+            res = subprocess.run([find_dosbox(), '-conf', conf, '-nogui',
+                                  '-nomenu', '-exit'], stdout=out,
+                                 stderr=subprocess.STDOUT, env=env,
+                                 timeout=timeout)
         except subprocess.TimeoutExpired:
             return False
-    return True
+    return res.returncode == 0
 
 
 def log(work):

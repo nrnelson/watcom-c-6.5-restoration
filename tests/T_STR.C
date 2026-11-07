@@ -48,14 +48,24 @@ static void part2( void )
     printf( "%s\n", ultoa( 0xFFFFFFFFUL, b2, 2 ) );
     d = div( 17, 5 ); ld = ldiv( -17L, 5L );
     printf( "12 %d %d %ld %ld %d %ld\n", d.quot, d.rem, ld.quot, ld.rem, abs( -9 ), labs( -99L ) );
+    /* one bit per predicate (the is* functions return bit masks, which
+       may overlap), printed for every character, 32 to a row */
     for( i = 0; i < 128; i++ ) {
-        n = isalpha( i ) + 2 * isdigit( i ) + 4 * isspace( i ) + 8 * ispunct( i ) +
-            16 * isupper( i ) + 32 * islower( i ) + 64 * isxdigit( i ) + 128 * iscntrl( i );
-        buf[i] = (char)( '0' + ( n != 0 ) );
+        n = ( isalpha( i ) != 0 ) | ( isdigit( i ) != 0 ) << 1 |
+            ( isspace( i ) != 0 ) << 2 | ( ispunct( i ) != 0 ) << 3 |
+            ( isupper( i ) != 0 ) << 4 | ( islower( i ) != 0 ) << 5 |
+            ( isxdigit( i ) != 0 ) << 6 | ( iscntrl( i ) != 0 ) << 7;
+        sprintf( buf + ( i % 32 ) * 2, "%02X", n );
+        if( i % 32 == 31 ) {
+            printf( "13 %3d %s\n", i - 31, buf );
+        }
     }
-    buf[128] = 0;
-    printf( "13 %s %c %c\n", buf, toupper( 'q' ), tolower( 'Q' ) );
-    srand( 1 ); printf( "14 %d %d %d\n", rand(), rand(), rand() );
+    printf( "13 %c %c\n", toupper( 'q' ), tolower( 'Q' ) );
+    srand( 1 );
+    i = rand();
+    n = rand();
+    key = rand();
+    printf( "14 %d %d %d\n", i, n, key );
     qsort( arr, 10, sizeof( int ), cmpint );
     for( i = 0; i < 10; i++ ) printf( "%d", arr[i] );
     key = 7; hit = bsearch( &key, arr, 10, sizeof( int ), cmpint );

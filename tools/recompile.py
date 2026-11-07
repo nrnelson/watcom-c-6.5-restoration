@@ -18,14 +18,22 @@ The M, L and H objects are compared byte for byte with the intact
 libraries' modules, the S and C objects with the surviving CLIBS/CLIBC
 modules where they survive (all read from the zip).  A source reproduces
 the module when M and L both match: they fix the code-model and the
-data-model halves of S and C.  When they do not match but
-recompile/NAME.accept exists (first line: the confidence, then why the
-difference is accepted), the S and C objects are kept anyway.
+data-model halves of S and C.  When they do not match, the S and C
+objects are kept only when recompile/NAME.accept exists and pins exactly
+the objects just compiled.  Its format: first line the confidence; then
+why the difference is accepted; then one line 'sha256 K <hex>' for each of
+the five objects (K = S, C, M, L, H).  All five must match: an accept file
+cannot vouch for a changed source, even one whose change shows only in
+the S and C objects.
 
 Kept objects go to build/objects/NAME.S.OBJ and NAME.C.OBJ, with
-build/objects/NAME.status saying exact or accepted, for tools/rebuild.py.
-Needs build/watcom (tools/install.py).
+build/objects/NAME.status for tools/rebuild.py: first line exact or
+accepted, then the per-model results, then 'sha256 S <hex>' and
+'sha256 C <hex>' of the kept objects (rebuild.py ignores an object that
+does not match).  Needs build/watcom (tools/install.py).
 """
+
+import hashlib
 
 import importlib.util
 import os
@@ -76,6 +84,21 @@ def source(name, zpath):
         return f.read()
 
 
+def accept_digests(path):
+    """{model: SHA-256} pinned by an accept file."""
+    out = {}
+    with open(path) as f:
+        for line in f:
+            w = line.split()
+            if len(w) == 3 and w[0] == 'sha256':
+                out[w[1]] = w[2].lower()
+    return out
+
+
+def sha256(data):
+    return hashlib.sha256(data).hexdigest()
+
+
 def recompile(names, zpath):
     """Compile and compare; returns {name: (results, exact?, kept?)}."""
     libs = {k: paths.library(k, zpath) for k in 'SCMLH'}
@@ -124,7 +147,14 @@ def recompile(names, zpath):
         accept = os.path.join(SRC, name + '.accept')
         sc_ok = all(res.get(k) in ('exact', 'no surviving module')
                     for k in 'SC')
-        kept = sc_ok and (ok or os.path.exists(accept))
+        accepted = False
+        if not ok and os.path.exists(accept):
+            pins = accept_digests(accept)
+            accepted = all(k in objs and pins.get(k) == sha256(objs[k])
+                           for k in 'SCMLH')
+            if not accepted:
+                res['accept'] = 'does not pin these objects'
+        kept = sc_ok and (ok or accepted)
         statf = os.path.join(paths.OBJECTS, name + '.status')
         for k in 'SC':
             p = os.path.join(paths.OBJECTS, '%s.%s.OBJ' % (name, k))
@@ -141,6 +171,8 @@ def recompile(names, zpath):
                 f.write('%s\n' % ('exact' if ok else 'accepted'))
                 f.write('  '.join('%s %s' % (k, res[k]) for k in 'MLHSC') +
                         '\n')
+                for k in 'SC':
+                    f.write('sha256 %s %s\n' % (k, sha256(objs[k])))
         results[name] = (res, ok, kept)
     return results
 
@@ -156,9 +188,10 @@ def main(argv):
     zpath = paths.check_zip(zpath)
     status = 0
     for name, (res, ok, kept) in recompile(args, zpath).items():
-        print('%s: %s%s' % (name, '  '.join('%s %s' % (k, res[k])
-                                             for k in 'MLHSC'),
-                            '' if ok else '  -- not reproduced'))
+        line = '  '.join('%s %s' % (k, res[k]) for k in 'MLHSC')
+        if 'accept' in res:
+            line += '  (%s.accept %s)' % (name, res['accept'])
+        print('%s: %s%s' % (name, line, '' if ok else '  -- not reproduced'))
         if kept and not ok:
             print('  kept as accepted: %s' % open(os.path.join(
                 SRC, name + '.accept')).readline().strip())

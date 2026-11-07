@@ -17,7 +17,10 @@ For each of the 250 modules of each damaged library:
                        C) module
               recompile  an object compiled by 6.5 from reconstructed source
                        (build/objects/<MODULE>.S.OBJ / .C.OBJ, made by
-                       tools/recompile.py), when present
+                       tools/recompile.py), used only when
+                       build/objects/<MODULE>.status says exact or accepted
+                       and gives the object's SHA-256; any other object
+                       there is ignored with a warning
               unchanged  CLIBM's module as it is, for the model-
                        independent routines of MODEL_INDEPENDENT
 Every route that applies is tried; the first that passes the checks in the
@@ -27,10 +30,13 @@ recorded.
 Writes OUTDIR/CLIBS.LIB, OUTDIR/CLIBC.LIB and OUTDIR/PROVENANCE.csv, and
 prints a summary.  The libraries keep the original header, module pages,
 end record and dictionary; the dictionary is checked against the publics of
-the rebuilt modules.
+the rebuilt modules (after the route is chosen: a mismatch fails the
+module).  Exit status 1 when any module FAILED; the libraries are still
+written, for diagnosis, but are incomplete.
 """
 
 import csv
+import hashlib
 import os
 import sys
 
@@ -41,6 +47,7 @@ import damage  # noqa: E402
 import omf  # noqa: E402
 import omfrec  # noqa: E402
 import paths  # noqa: E402
+import recompile  # noqa: E402
 import survey  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -57,6 +64,14 @@ REPAIRS = {
                   'all have D1 D1 here'),
           11581: (0x81, 0xD1, 'AMODF code: see byte 11580')},
 }
+
+
+def repair_note(k, start, end):
+    """The REPAIRS of library k inside [start, end), as a note ('' if
+    none)."""
+    return '; '.join('byte %d %02X->%02X: %s' % (o, a, b, w)
+                     for o, (a, b, w) in sorted(REPAIRS.get(k, {}).items())
+                     if start <= o < end)
 
 
 def set_theadr(data, name):
@@ -106,8 +121,6 @@ def confidence(row):
         return 'original'
     if row['status'] == 'FAILED':
         return ''
-    if row['status'].endswith('-undersize'):
-        return 'low'
     notes = set(row.get('notes', '').split())
     accepted = [n for n in notes if n.startswith('recompile-accepted:')]
     if accepted:
@@ -127,16 +140,42 @@ def confidence(row):
 
 def end_of_modules(lib):
     """Offset of the library end record (F1), which follows the last
-    module's page span."""
-    d = lib.data
-    o = lib.starts[-1]
-    raw = lib.module(o)
-    if raw:
-        t, b, p = raw[-1]
-        o = p + 3 + len(b) + 1
-    while d[o] != 0xF1:
-        o += 1
-    return o
+    module's page span (omf.Lib.end_of_modules)."""
+    return lib.end_of_modules()
+
+
+def recompiled(name, k):
+    """(object bytes, note) of build/objects/NAME.k.OBJ when
+    tools/recompile.py made it (NAME.status: first word exact or accepted,
+    and a 'sha256 k <hex>' line matching the object), else None, with a
+    warning when an object is there but not vouched for."""
+    obj = os.path.join(paths.OBJECTS, '%s.%s.OBJ' % (name, k))
+    if not os.path.exists(obj):
+        return None
+    with open(obj, 'rb') as f:
+        data = f.read()
+    stat = os.path.join(paths.OBJECTS, name + '.status')
+    lines = open(stat).read().splitlines() if os.path.exists(stat) else []
+    level = lines[0].split()[0] if lines and lines[0].split() else ''
+    digest = {w[1]: w[2] for w in (line.split() for line in lines[1:])
+              if len(w) == 3 and w[0] == 'sha256'}
+    if level not in ('exact', 'accepted'):
+        print('warning: %s ignored: %s does not say exact or accepted' %
+              (obj, stat))
+        return None
+    if k not in digest:
+        print('warning: %s ignored: %s gives no SHA-256 for it' % (obj, stat))
+        return None
+    if digest[k] != hashlib.sha256(data).hexdigest():
+        print('warning: %s ignored: its SHA-256 is not the one %s gives' %
+              (obj, stat))
+        return None
+    note = ''
+    if level == 'accepted':
+        acc = open(os.path.join(ROOT, 'recompile',
+                                name + '.accept')).readline()
+        note = 'recompile-accepted:%s' % acc.split()[0]
+    return data, note
 
 
 def module_raw(lib, start):
@@ -236,26 +275,15 @@ def main(argv):
                 row['status'] = 'original'
                 row['route'] = ''
                 row['notes'] = ''
-                if any(o in REPAIRS.get(k, {}) for o in range(start, end)):
+                if repair_note(k, start, end):
                     row['status'] = 'original-repaired'
-                    row['notes'] = '; '.join(
-                        'byte %d %02X->%02X: %s' % (o, a, b, w)
-                        for o, (a, b, w) in REPAIRS[k].items()
-                        if start <= o < end)
+                    row['notes'] = repair_note(k, start, end)
                 rows.append(row)
                 continue
             cands = []
-            obj = os.path.join(paths.OBJECTS, '%s.%s.OBJ' % (name, k))
-            if os.path.exists(obj):
-                stat = os.path.join(paths.OBJECTS, name + '.status')
-                note = ''
-                if os.path.exists(stat) and \
-                        open(stat).readline().strip() == 'accepted':
-                    acc = open(os.path.join(ROOT, 'recompile',
-                                            name + '.accept')).readline()
-                    note = 'recompile-accepted:%s' % acc.split()[0]
-                with open(obj, 'rb') as f:
-                    cands.append(('recompile', f.read(), note))
+            got = recompiled(name, k)
+            if got:
+                cands.append(('recompile', got[0], got[1]))
             if name in MODEL_INDEPENDENT:
                 cands.append(('unchanged', module_raw(big['M'],
                                                       big['M'].starts[i]),
@@ -294,27 +322,21 @@ def main(argv):
                      if chosen and b == chosen[1] and r != chosen[0]]
             disagree = [r for r, b, ok, why, n in results
                         if chosen and b != chosen[1]]
-            undersize = False
-            if not chosen:
-                # last resort: a candidate shorter than the span by more
-                # than a page (it leaves an extra zero page before the
-                # next module; module positions and the dictionary stay
-                # valid) that matches every genuine byte
-                for route, b, ok, why, notes in results:
-                    if len(b) < end - start and check(
-                            b + bytes(((end - start - len(b)) // 16) * 16),
-                            start, end, genuine, lib.data)[0]:
-                        chosen = (route, b, notes + ' undersize')
-                        undersize = True
-                        break
             if chosen:
                 route, b, notes = chosen
                 out[start:end] = b + bytes(end - start - len(b))
                 row['status'] = 'anchored' if ngen else 'inferred'
-                if undersize:
-                    row['status'] += '-undersize'
                 row['route'] = route
-                row['notes'] = notes.strip()
+                notes = notes.strip()
+                if route == 'cross':
+                    o_start, o_end = ok_lib.span(ok_lib.starts[i])
+                    if repair_note(OTHER[k], o_start, o_end):
+                        # the bytes come from the other library's repaired
+                        # module
+                        notes = (notes + ' cross-from-repaired').strip()
+                # repaired bytes of this library inside the span
+                repaired = repair_note(k, start, end)
+                row['notes'] = '; '.join(x for x in (notes, repaired) if x)
             else:
                 row['status'] = 'FAILED'
                 row['route'] = ''
@@ -374,6 +396,15 @@ def main(argv):
                 print('  %(lib)s %(index)3d %(module)-10s %(status)-9s '
                       '%(route)-8s %(notes)s' % dict(r, route=r.get(
                           'route', '')))
+    failed = [r for r in rows if r['status'] == 'FAILED']
+    if failed:
+        print('FAILED: %s' % ', '.join('%s %s' % (r['lib'], r['module'])
+                                       for r in failed))
+        if {r['module'] for r in failed} <= set(recompile.MODULES):
+            print('these are rebuilt from recompiled objects: run '
+                  'tools/recompile.py first (restore.py does)')
+        print('the libraries in %s are written but INCOMPLETE' % outdir)
+        return 1
     return 0
 
 

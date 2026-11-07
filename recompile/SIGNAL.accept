@@ -4,3 +4,8 @@ index is computed in BX (sig kept in SI) where the libraries compute it in
 SI; every other byte matches.  No source form tried changes this register
 choice; the library may have been built with a slightly different compiler
 revision.  The S and C objects are the same source compiled /ms and /mc.
+sha256 S 7f40b53d53c8e3953108b6c79a9f17459fcfdedcb1649756894cd00023e2a13a
+sha256 C f55a00475b94d65b0447d9d909c0142f78f58cc86f5dddb7ba6f4838a9c87278
+sha256 M bbefe19ae65c30deaa0c8b848b199d5c4852c38286d2dd3fefca6dd29b8378fa
+sha256 L 20897f5806ffc8a8f8d5b176341f7f4aebdce52717101866c5fa51f915024674
+sha256 H 65f05e05029fb8525b126f2967978659c8e72e100bf4411d3ab9f558f94cac74

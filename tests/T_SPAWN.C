@@ -1,4 +1,7 @@
-/* T_SPAWN - process: spawn a child, system-like behaviour, exit codes. */
+/* T_SPAWN - process: spawn a child, system-like behaviour, exit codes.
+   The process exit status is expected to be 3: the program ends by
+   exec-ing itself with argument 3, and that child returns 3
+   (tools/difftest.py, EXPECT_EXIT). */
 #include <stdio.h>
 #include <stdlib.h>
 #include <process.h>

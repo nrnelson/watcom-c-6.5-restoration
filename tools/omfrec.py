@@ -10,7 +10,12 @@ LNAMES 96, SEGDEF 98, GRPDEF 9A, FIXUPP 9C, LEDATA A0, LIDATA A2.  Anything
 else is kept raw.
 """
 
-import omf
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import omf  # noqa: E402
 
 
 def rd_index(b, i):
@@ -256,6 +261,5 @@ def roundtrip(path):
 
 
 if __name__ == '__main__':
-    import sys
     for p in sys.argv[1:]:
         print(p, roundtrip(p))

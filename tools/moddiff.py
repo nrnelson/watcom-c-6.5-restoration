@@ -61,6 +61,10 @@ def disasm(data, tag):
         raise SystemExit('wdis (Open Watcom) not found: install it or set '
                          'WCR_WDIS, or leave out -d')
     out = subprocess.run([WDIS, '-a', path], capture_output=True, text=True)
+    if out.returncode != 0 or not out.stdout.strip():
+        # an empty listing would make the two modules look the same
+        raise SystemExit('wdis failed on %s (exit status %d): %s' % (
+            path, out.returncode, out.stderr.strip() or 'no output'))
     return out.stdout.splitlines()
 
 

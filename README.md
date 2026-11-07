@@ -5,7 +5,10 @@ the earliest version of the Watcom C compiler that still survives.  The
 only copy of it I could find is damaged: its small-model and compact-model
 run-time libraries, `CLIBS.LIB` and `CLIBC.LIB`, have each lost more than
 half of their contents.  Without them the compiler can only build medium,
-large and huge model programs.  Another copy may well exist somewhere (see
+large and huge model programs.  The compiler itself (its programs, headers
+and other libraries) survived intact; what this project rebuilds is those
+two run-time libraries, so its outputs are reconstructed substitutes for
+two damaged files.  Another copy may well exist somewhere (see
 [below](#looking-for-another-copy)); until one turns up, this restoration
 is the way to make the compiler whole again.
 
@@ -58,16 +61,20 @@ files (DISK1-DISK8), dated 31 May 1988.  Every file checks out except two:
 
 | library | model | state in the archive |
 |---|---|---|
-| `CLIBS.LIB` | small (near code, near data) | 96 of 188 sectors replaced, 141 of 250 modules lost |
-| `CLIBC.LIB` | compact (near code, far data) | 101 of 198 sectors replaced, 146 of 250 modules lost |
+| `CLIBS.LIB` | small (near code, near data) | 96 of 188 sectors foreign, 141 of 250 modules lost |
+| `CLIBC.LIB` | compact (near code, far data) | 101 of 198 sectors foreign, 146 of 250 modules lost |
 | `CLIBM.LIB`, `CLIBL.LIB`, `CLIBH.LIB` | medium, large, huge | intact |
 
-Whole 512-byte sectors of the two files hold other files' data instead:
-pieces of `WDISASM.EXE`, `WMAKE.EXE`, `WLINK.EXE`, `WVIDEO.HLP`,
-`MATHM.LIB` and `CLIBM.LIB`, mostly at the same offsets those files have
-themselves.  It looks like the copy was made from a hard disk with
-unreadable sectors, where the copying tool left whatever it had read
-before.  The true bytes of those sectors are gone; a checksum can show a
+What can be observed: whole 512-byte sectors of the two files hold other
+files' data instead: pieces of `WDISASM.EXE`, `WMAKE.EXE`, `WLINK.EXE`,
+`WVIDEO.HLP`, `MATHM.LIB` and `CLIBM.LIB`, mostly at the same offsets those
+files have themselves.  Of the 96 foreign sectors of `CLIBS.LIB`, 93 match
+other files' bytes; the other 3 are lone sectors between foreign runs that
+match nothing and were classified as foreign by inspection (METHOD.md,
+section 4).  How it happened is a hypothesis, not evidence: it looks as if
+the copy was made from a hard disk with unreadable sectors, where the
+copying tool left whatever it had read before.  The sector pattern is the
+evidence.  The true bytes of those sectors are gone; a checksum can show a
 record is bad, but cannot bring back its content.  Three further bytes in
 otherwise good sectors are corrupted by bit errors.
 
@@ -85,8 +92,15 @@ Before starting, I looked for another copy, without success:
   has no 16-bit libraries at all.
 - Later versions (8.x to 11.0) have a different code generator and
   run-time library, so they cannot supply 6.5's bytes.
-- The WATCOM Express C library shipped with 6.5 is the medium-model
-  library plus Express's own modules: no small-model code.
+- The WATCOM Express C library shipped with 6.5 (`WCEXPL.LIB`) has 591
+  modules.  241 of the 250 medium-library modules appear in it byte for
+  byte; 7 medium modules are absent by name (WRITE, READ, QREAD, MIN, MAX,
+  SIGNAL, FTOSX) and 2 same-named ones differ (GETCTIME, D2TTIME).  No
+  Express module carries the compiler's `_small_code_` marker, and of the
+  35 modules whose code segment is named `_TEXT`, 28 are byte-identical to
+  CLIBM's assembler modules of the same name and the other 7 are 8087 math
+  modules (ATAN87, EXP87, LOG87, SIN87, SQRT87, TAN87, I64TOS).  The search
+  found no small-model donor in Express.
 - I could not find any copy of 6.0 or earlier either.
 
 That is the limit of my search, not proof that nothing else survives.
@@ -137,21 +151,30 @@ the ones that were lost.
 | rebuilt and matching every surviving byte of a partly damaged module | 2 | 2 |
 | rebuilt with nothing left to check against | 141 | 146 |
 
-- On the modules that survived, the converter reproduces 97 of 106 small
-  and 93 of 102 compact modules byte for byte, every record; the
-  recompile route reproduces the one module it was tested on (PRINTF) in
-  all five libraries, including the surviving small and compact ones.
-- The partly surviving compact `SCNF` module, 3088 of its 3424 bytes
-  intact, is matched exactly by the rebuilt one.
-- Both restored libraries pass a strict check of every module and record,
-  link with Watcom's own linker, and the test programs (strings, stdio,
-  floating point, files, directories, time, setjmp, signals, three kinds
-  of heap, environment, spawn and exec) give the same output in all four
-  memory models.
-- **Confidence**: an estimated 90-94% of all modules are byte-identical to
-  the lost originals, and 97-98% of all bytes; the chance that either whole
-  library is byte-identical is close to zero.  Behaviour is better than
-  that: everything tested works as the originals do.
+- **Measured on the survivors**: the converter reproduces 97 of 106 small
+  and 93 of 102 compact modules byte for byte, every record; the cross
+  route (taking the other damaged library's module where the medium and
+  large modules are identical) is exact in 30 of 30 surviving pairs (the
+  same 30 pairs in both directions); the recompile route reproduces the
+  one module it was tested on (PRINTF) in all five libraries, including
+  the surviving small and compact ones.  These rules were developed on
+  those same modules, so the scores are optimistic for the lost ones.
+- **Preserved**: 106 small modules (and TELL, after a one-bit repair) and
+  102 compact modules are kept byte for byte, and every surviving byte of
+  the four partly damaged modules is matched.
+- **The strongest constraint**: the partly surviving compact `SCNF`
+  module, 3088 of its 3424 bytes intact, is matched exactly by the rebuilt
+  one (three converter rules were found on it, so it is a constraint, not
+  an independent prediction).
+- **Tests**: both restored libraries pass a strict check of every module
+  and record, link with Watcom's own linker, and six test programs
+  (strings, stdio, floating point, files, directories, time, setjmp,
+  signals, three kinds of heap, environment, spawn and exec, and the DOS
+  interrupt wrappers) build in all four memory models, exit with the
+  expected status and give the same output.
+- How many of the lost modules are byte-identical to the originals cannot
+  be measured; METHOD.md, section 14, gives my estimate and its
+  arithmetic, which is a judgment, not a measurement.
 
 `PROVENANCE.csv` lists every module of both libraries: whether it is
 original or rebuilt, how, with what confidence, and anything unusual the
@@ -202,10 +225,14 @@ sudo apt install python3 dosbox-x
 (tick "Add python.exe to PATH"), and DOSBox-X from
 <https://dosbox-x.com/> (the installer, or the portable zip).  The script
 finds DOSBox-X on the PATH or in `C:\DOSBox-X` and `C:\Program Files\DOSBox-X`;
-anywhere else, tell it where:
+anywhere else, tell it where (Command Prompt, then PowerShell):
 
 ```
 set WCR_DOSBOX=D:\Tools\DOSBox-X\dosbox-x.exe
+```
+
+```
+$env:WCR_DOSBOX = 'D:\Tools\DOSBox-X\dosbox-x.exe'
 ```
 
 **macOS**: Python from python.org or Homebrew, DOSBox-X from
@@ -223,12 +250,21 @@ cp ~/Downloads/"Watcom C.ver.6.5.English.zip" .
 python3 restore.py
 ```
 
-Windows (Command Prompt or PowerShell):
+Windows, Command Prompt:
 
 ```
 git clone https://github.com/nrnelson/watcom-c-6.5-restoration.git
 cd watcom-c-6.5-restoration
 copy "%USERPROFILE%\Downloads\Watcom C.ver.6.5.English.zip" .
+py restore.py
+```
+
+Windows, PowerShell:
+
+```
+git clone https://github.com/nrnelson/watcom-c-6.5-restoration.git
+cd watcom-c-6.5-restoration
+Copy-Item -LiteralPath "$env:USERPROFILE\Downloads\Watcom C.ver.6.5.English.zip" -Destination .
 py restore.py
 ```
 
@@ -245,26 +281,50 @@ compares the result with the published restoration.  It ends with:
 out/CLIBS.LIB: 250 modules ok
   SHA-256 95100563d6885e7f0eba7c1a96aa0587bdf2fbe9ef8bfbaf73a367f85216b8c0: identical to the published restoration
 out/CLIBC.LIB: 250 modules ok
-  SHA-256 b53e05b77252a952e0896abc3612846bae2a10f4c584d1fa682e752b6e24bcae: identical to the published restoration
+  SHA-256 69e6fe1e9b4e0f2b50e047c24c2678fe564c773ead325356376ddce794d9d58b: identical to the published restoration
 ```
 
 The process is deterministic: the same archive gives the same bytes on
 every machine.  Add `--test` to also build and run the test programs in
-all four memory models (a few more minutes).
+all four memory models (a few more minutes).  Any failed check makes the
+script end with "with problems" and exit status 1.
+
+Two more environment variables: `WCR_ZIP` gives the archive's path, and
+`WCR_BUILD` moves the `build/` work folder elsewhere.  The tools delete
+and recreate their own subfolders of `build/` (`build/watcom`,
+`build/objects`, `build/recompile`, `build/difftest`,
+`build/watcom-restored`) on each run, so do not keep anything of your own
+there.
 
 ### 4. Use them
 
 `out/CLIBS.LIB` and `out/CLIBC.LIB` replace the damaged files in the `LIB`
 directory of a Watcom C 6.5 installation (in DOS, an emulator, or a
-virtual machine).  The script can do it, keeping the damaged files as
-`CLIBS.BAD` and `CLIBC.BAD`:
+virtual machine).  The script can do it:
 
 ```
 python3 restore.py --install /path/to/WATCOM/LIB
 ```
 
-`build/watcom` is itself a complete Watcom C 6.5 installation, unpacked
-from the archive, if you do not have one.
+It installs only when every check of the run passed (with `--test`, the
+tests too), and only into a directory that already holds `CLIBS.LIB` and
+`CLIBC.LIB`.  The libraries found there are first copied to `CLIBS.BAD`
+and `CLIBC.BAD`, unless those files already exist: an existing `.BAD` is
+kept as it is, and is not checked, so after a second install it still
+holds the libraries from before the first.  Both new libraries are written
+beside the old ones and then moved into place; if moving the second
+fails, the first is put back, so the directory does not end up with one
+new and one old library.  (That covers an error reported during the
+install, not a crash or power loss between the two moves.)
+
+`build/watcom` is Watcom C 6.5 as the archive's `INSTALL.SCR` copies it
+(BIN, H, LIB, SRC, README.1ST), **with the damaged libraries still in
+place**; the installer does not generate the files `INSTALL.SCR` would
+also write (NEWCONF.SYS, NEWAUTO.BAT, DEMO.BAT, GRDEMO.BAT, DEMOEXP.BAT).
+`build/watcom-restored`, made by `--test` or by
+`python3 -I tools/install.py --restored`, is the same tree with the
+restored libraries in place, ready to use if you have no installation of
+your own.
 
 
 ## What is in this repository
@@ -280,6 +340,48 @@ from the archive, if you do not have one.
 
 Made when you run it, and not committed: `build/` (the installed compiler
 and work files) and `out/` (the restored libraries).
+
+`PROVENANCE.csv` fields:
+
+| field | meaning |
+|---|---|
+| `lib` | CLIBS or CLIBC |
+| `index` | the module's position in the library, 0-249 |
+| `module` | the module name as the library's dictionary spells it |
+| `offset` | file offset of the module's first page |
+| `span` | the page span allocated to the module, in bytes; the original object's length is known only to within 16 bytes |
+| `genuine_bytes` | bytes of the span outside foreign sectors, padding included; repaired bytes count as genuine |
+| `status` | `original` (survives whole), `original-repaired` (whole after a repair), `anchored` (rebuilt, matching surviving bytes in its span), `inferred` (rebuilt, nothing in its span survives), `FAILED` (no route fitted) |
+| `route` | how a rebuilt module was made: `recompile`, `unchanged`, `cross` or `convert` (METHOD.md, section 10) |
+| `confidence` | `original`, `high`, `medium` or `low` (METHOD.md, section 10) |
+| `agrees` | other routes that gave the same bytes |
+| `disagrees` | other routes that gave other bytes or failed the checks |
+| `notes` | the converter's note classes (the `@offset` suffixes the tools print are dropped), repairs, and other remarks |
+
+
+## Independent audit (November 2026)
+
+An independent audit of the published restoration found one real defect:
+in the compact library, `int86` and `int86x` reloaded their output pointer
+from the wrong stack offset after the interrupt, so a failing DOS call
+(carry set) was reported with carry clear and a wrong return value.  The
+converter had stopped following the stack frame at the inline code that
+emulates an `INT`; the rule is now general (METHOD.md, section 7.3) and
+changes exactly two displacement bytes (and two record checksums) in
+`CLIBC.LIB`.  The audit also found that the installer, the library checker,
+the test runner and the recompile route checked less than they claimed;
+all of them now enforce what this document and METHOD.md say.  The small
+library is unchanged.
+
+| | `CLIBC.LIB` SHA-256 |
+|---|---|
+| before the audit (pre-fix) | `b53e05b77252a952e0896abc3612846bae2a10f4c584d1fa682e752b6e24bcae` |
+| now | `69e6fe1e9b4e0f2b50e047c24c2678fe564c773ead325356376ddce794d9d58b` |
+
+`CLIBS.LIB` remains
+`95100563d6885e7f0eba7c1a96aa0587bdf2fbe9ef8bfbaf73a367f85216b8c0`.  If you
+installed the earlier `CLIBC.LIB`, run the restoration again and reinstall
+it.
 
 
 ## Limits
