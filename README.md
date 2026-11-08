@@ -68,10 +68,10 @@ files (DISK1-DISK8), dated 31 May 1988.  Every file checks out except two:
 What can be observed: whole 512-byte sectors of the two files hold other
 files' data instead: pieces of `WDISASM.EXE`, `WMAKE.EXE`, `WLINK.EXE`,
 `WVIDEO.HLP`, `MATHM.LIB` and `CLIBM.LIB`, mostly at the same offsets those
-files have themselves.  Of the 96 foreign sectors of `CLIBS.LIB`, 93 match
-other files' bytes; the other 3 are lone sectors between foreign runs that
-match nothing and were classified as foreign by inspection (METHOD.md,
-section 4).  How it happened is a hypothesis, not evidence: it looks as if
+files have themselves.  All 96 foreign sectors of `CLIBS.LIB` match other
+files' bytes; three of them are split sectors, holding the end of one file
+followed by the next file's bytes at the same offsets (METHOD.md, section
+4).  How it happened is a hypothesis, not evidence: it looks as if
 the copy was made from a hard disk with unreadable sectors, where the
 copying tool left whatever it had read before.  The sector pattern is the
 evidence.  The true bytes of those sectors are gone; a checksum can show a
@@ -149,7 +149,12 @@ the ones that were lost.
 |---|---|---|
 | original modules, kept byte for byte | 106 (+1 repaired) | 102 |
 | rebuilt and matching every surviving byte of a partly damaged module | 2 | 2 |
-| rebuilt with nothing left to check against | 141 | 146 |
+| rebuilt; no bytes survive in the original library span | 141 | 146 |
+
+For some of the rebuilt modules the code survives elsewhere: 56 small and
+5 compact code segments are found byte for byte in programs shipped on the
+same disks, linked from the original libraries (METHOD.md, section 17).
+That checks instruction bytes only, not the object records.
 
 - **Measured on the survivors**: the converter reproduces 97 of 106 small
   and 93 of 102 compact modules byte for byte, every record; the cross
@@ -167,11 +172,13 @@ the ones that were lost.
   one (three converter rules were found on it, so it is a constraint, not
   an independent prediction).
 - **Tests**: both restored libraries pass a strict check of every module
-  and record, link with Watcom's own linker, and six test programs
+  and record, Watcom's own 1988 librarian extracts every module unchanged
+  and its linker links every one of them, and seven test programs
   (strings, stdio, floating point, files, directories, time, setjmp,
-  signals, three kinds of heap, environment, spawn and exec, and the DOS
-  interrupt wrappers) build in all four memory models, exit with the
-  expected status and give the same output.
+  signals, three kinds of heap, environment, spawn and exec, the DOS
+  interrupt wrappers, and interrupt chaining) build in all four memory
+  models, and one also as a tiny-model .COM, exit with the expected status
+  and give the same output.
 - How many of the lost modules are byte-identical to the originals cannot
   be measured; METHOD.md, section 14, gives my estimate and its
   arithmetic, which is a judgment, not a measurement.
@@ -279,22 +286,23 @@ compares the result with the published restoration.  It ends with:
 
 ```
 out/CLIBS.LIB: 250 modules ok
-  SHA-256 95100563d6885e7f0eba7c1a96aa0587bdf2fbe9ef8bfbaf73a367f85216b8c0: identical to the published restoration
+  SHA-256 6cd1fee804d12b2e811709f6f2042354c0b80ea444e97257e377fb9e57bf3a81: identical to the published restoration
 out/CLIBC.LIB: 250 modules ok
-  SHA-256 69e6fe1e9b4e0f2b50e047c24c2678fe564c773ead325356376ddce794d9d58b: identical to the published restoration
+  SHA-256 9fea459aaaf22ef2feb5284f39c22244ad49312f2330684871566779c06445ae: identical to the published restoration
 ```
 
 The process is deterministic: the same archive gives the same bytes on
 every machine.  Add `--test` to also build and run the test programs in
-all four memory models (a few more minutes).  Any failed check makes the
+all four memory models, and one of them (`T_INT`) also as a tiny-model
+.COM (a few more minutes).  Any failed check makes the
 script end with "with problems" and exit status 1.
 
 Two more environment variables: `WCR_ZIP` gives the archive's path, and
 `WCR_BUILD` moves the `build/` work folder elsewhere.  The tools delete
 and recreate their own subfolders of `build/` (`build/watcom`,
 `build/objects`, `build/recompile`, `build/difftest`,
-`build/watcom-restored`) on each run, so do not keep anything of your own
-there.
+`build/periodcheck`, `build/watcom-restored`) on each run, so do not keep
+anything of your own there.
 
 ### 4. Use them
 
@@ -359,29 +367,33 @@ and work files) and `out/` (the restored libraries).
 | `notes` | the converter's note classes (the `@offset` suffixes the tools print are dropped), repairs, and other remarks |
 
 
-## Independent audit (November 2026)
+## Earlier outputs
 
-An independent audit of the published restoration found one real defect:
-in the compact library, `int86` and `int86x` reloaded their output pointer
-from the wrong stack offset after the interrupt, so a failing DOS call
-(carry set) was reported with carry clear and a wrong return value.  The
-converter had stopped following the stack frame at the inline code that
-emulates an `INT`; the rule is now general (METHOD.md, section 7.3) and
-changes exactly two displacement bytes (and two record checksums) in
-`CLIBC.LIB`.  The audit also found that the installer, the library checker,
-the test runner and the recompile route checked less than they claimed;
-all of them now enforce what this document and METHOD.md say.  The small
-library is unchanged.
+The restoration has published these library hashes, in order; the last
+row is what `restore.py` makes now.
 
-| | `CLIBC.LIB` SHA-256 |
-|---|---|
-| before the audit (pre-fix) | `b53e05b77252a952e0896abc3612846bae2a10f4c584d1fa682e752b6e24bcae` |
-| now | `69e6fe1e9b4e0f2b50e047c24c2678fe564c773ead325356376ddce794d9d58b` |
+| | `CLIBS.LIB` SHA-256 | `CLIBC.LIB` SHA-256 |
+|---|---|---|
+| 1 | `95100563d6885e7f0eba7c1a96aa0587bdf2fbe9ef8bfbaf73a367f85216b8c0` | `b53e05b77252a952e0896abc3612846bae2a10f4c584d1fa682e752b6e24bcae` |
+| 2 | (as 1) | `69e6fe1e9b4e0f2b50e047c24c2678fe564c773ead325356376ddce794d9d58b` |
+| 3 | `6cd1fee804d12b2e811709f6f2042354c0b80ea444e97257e377fb9e57bf3a81` | `9fea459aaaf22ef2feb5284f39c22244ad49312f2330684871566779c06445ae` |
 
-`CLIBS.LIB` remains
-`95100563d6885e7f0eba7c1a96aa0587bdf2fbe9ef8bfbaf73a367f85216b8c0`.  If you
-installed the earlier `CLIBC.LIB`, run the restoration again and reinstall
-it.
+What changed in the libraries:
+
+- 1 to 2, compact only: `int86` and `int86x` reload their output pointer
+  from the right stack offset after the interrupt (METHOD.md, section
+  7.3); before, a failing DOS call came back with carry clear and a wrong
+  return value.
+- 2 to 3, both libraries: DOINTR's code segment is `_TEXT` (section 7.1),
+  so `intr()` no longer writes 12 bytes of scratch into the caller's code
+  segment, and CHAININT ends in its RETF again (section 7.3), so
+  `_chain_intr()` jumps far to the previous handler instead of returning
+  near.
+
+If you installed earlier libraries, run the restoration again, reinstall
+them, and relink programs that use `int86` or `int86x` (compact model),
+or `intr`, `_chain_intr` or `signal` (the INT 23h handler that `signal`
+installs calls `_chain_intr` on its child-process branch).
 
 
 ## Limits

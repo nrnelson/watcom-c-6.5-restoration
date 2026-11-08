@@ -105,7 +105,8 @@ def set_theadr(data, name):
 # 96% of surviving modules; with any RISKY note it was mostly wrong.
 RISKY = {'call-far-indirect', 'jmp-far-indirect', 'far-code-pointer',
          'code-offset-in-field', 'code-segment-ref', 'code-segment-store',
-         'return-address-access', 'interrupt-call-kept'}
+         'return-address-access', 'interrupt-call-kept',
+         'code-segment-renamed'}
 
 
 # Assembler modules taken unchanged from CLIBM (far routines in every
@@ -267,8 +268,13 @@ def main(argv):
         for i, start in enumerate(lib.starts):
             end = lib.starts[i + 1] if i + 1 < len(lib.starts) else endmods
             ngen = sum(1 for o in range(start, end) if o in genuine)
+            # name: the donor's THEADR, for the donor-side lookups; dname:
+            # the module name as the dictionary spells it (six CLIBS
+            # modules have lower-case names there), for the row and the
+            # rebuilt object
             name = omf.theadr(src.module(src.starts[i]))
-            row = {'lib': 'CLIB%s' % k, 'index': i, 'module': name,
+            dname = [n for n in lib.names[start] if n.endswith('!')][0][:-1]
+            row = {'lib': 'CLIB%s' % k, 'index': i, 'module': dname,
                    'offset': start, 'span': end - start,
                    'genuine_bytes': ngen}
             if whole(k, i):
@@ -301,9 +307,6 @@ def main(argv):
                                                for n in notes}))))
             except convert.Unsupported as e:
                 row.setdefault('tried', []).append('convert: %s' % e)
-            # the module name as the dictionary spells it (six CLIBS
-            # modules have lower-case names there)
-            dname = [n for n in lib.names[start] if n.endswith('!')][0][:-1]
             fixed = []
             for route, b, notes in cands:
                 if publics(b)[0] != dname:

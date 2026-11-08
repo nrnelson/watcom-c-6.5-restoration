@@ -19,8 +19,10 @@ Steps:
      end record and the dictionary checked (tools/checklib.py), and the
      SHA-256 of each compared with the published result; any failure
      fails the run;
-  6. with --test, build and run the test programs in all four models; a
-     failure fails the run;
+  6. with --test, build and run the test programs in all four models (and
+     T_INT also as a tiny-model .COM), then have the 1988 WLIB extract
+     every module of both libraries and WLINK link every one of them
+     (tools/periodcheck.py); a failure fails the run;
   7. with --install DIR, and only when every step above passed, install
      the restored libraries into DIR, the LIB directory of a Watcom C 6.5
      installation, which must already hold CLIBS.LIB and CLIBC.LIB.  The
@@ -49,14 +51,15 @@ import checklib  # noqa: E402
 import difftest  # noqa: E402
 import install  # noqa: E402
 import paths  # noqa: E402
+import periodcheck  # noqa: E402
 import rebuild  # noqa: E402
 import recompile  # noqa: E402
 
 EXPECTED = {
     'CLIBS.LIB':
-        '95100563d6885e7f0eba7c1a96aa0587bdf2fbe9ef8bfbaf73a367f85216b8c0',
+        '6cd1fee804d12b2e811709f6f2042354c0b80ea444e97257e377fb9e57bf3a81',
     'CLIBC.LIB':
-        '69e6fe1e9b4e0f2b50e047c24c2678fe564c773ead325356376ddce794d9d58b',
+        '9fea459aaaf22ef2feb5284f39c22244ad49312f2330684871566779c06445ae',
 }
 LIBS = ('CLIBS', 'CLIBC')
 
@@ -205,8 +208,10 @@ def main(argv):
             status = 1
 
     if test:
-        step(6, 'running the test programs in all four models')
+        step(6, 'running the test programs in all four models and tiny, '
+             'then WLIB and WLINK on every module')
         status |= difftest.main(['difftest.py'])
+        status |= periodcheck.main(['periodcheck.py'])
 
     if target:
         step(7, 'installing the restored libraries into %s' % target)

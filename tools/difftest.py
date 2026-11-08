@@ -5,25 +5,32 @@ usage: python3 -I tools/difftest.py [--no-run] [TEST ...]
 Each tests/<TEST>.C (default: all) is compiled by Watcom C 6.5 in the small,
 compact, medium and large models and linked by WLINK 4.1: small and compact
 against the restored out/CLIBS.LIB and out/CLIBC.LIB, medium and large
-against the intact original libraries.  Every program runs in DOSBox-X
-(MS-DOS 3.10) with its output captured, each in its own DOSBox-X instance
-(four at a time), so a program that hangs only loses its own output.  The
-batch file appends the program's exit status (EXIT=n, from an IF
-ERRORLEVEL ladder; EXIT=10+ for 10 and above) and DONE to the output, or
-NO-EXE when nothing was linked.  For each model the run must have finished
-(DOSBox-X ended in time, exit status 0), the output must end with DONE,
-hold exactly one EXIT= line, giving the expected status (EXPECT_EXIT,
-default 0), and print something besides; then the outputs of all four
-models must be the same; differences are printed.  --no-run only reports
-on the last run (without the emulator check).
+against the intact original libraries.  The tests named in TINY are also
+built as a tiny-model .COM (model t): compiled /ms, linked after the shipped
+startup object LIB/CSTART_T.OBJ against CLIBS.LIB, converted by EXE2COM.
+Every program runs in DOSBox-X (MS-DOS 3.10) with its output captured, each
+in its own DOSBox-X instance (four at a time), so a program that hangs only
+loses its own output.  The batch file appends the program's exit status
+(EXIT=n, from an IF ERRORLEVEL ladder; EXIT=10+ for 10 and above) and DONE
+to the output, or NO-EXE when nothing was linked (no .COM for model t).  For
+each model the run must have finished (DOSBox-X ended in time, exit status
+0), the output must end with DONE, hold exactly one EXIT= line, giving the
+expected status (EXPECT_EXIT, default 0), and print something besides, and
+the compiler's, linker's and (model t) EXE2COM's logs must show no error;
+then the outputs of all its models must equal the medium model's;
+differences are printed.  --no-run only reports on the last run (without the
+emulator check).  A program whose last line has no newline gets the EXIT=
+marker appended to that line; the runner splits it off again when it is the
+only place the marker is found.
 
 Work files go to build/difftest.  Needs build/watcom (tools/install.py) and
 the restored libraries in out/ (tools/rebuild.py).  Exit status 0 when every
-test builds, runs and agrees in all four models.
+test builds, runs and agrees in all its models.
 """
 
 import difflib
 import os
+import re
 import shutil
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -37,19 +44,35 @@ import paths  # noqa: E402
 WORK = os.path.join(paths.BUILD, 'difftest')
 TOOL = os.path.join(paths.BUILD, 'watcom-restored')
 MODELS = 'scml'
+# tests also built as a tiny-model .COM (model t); T_CHAIN cannot be: its
+# interrupt functions load DS from DGROUP, a relocation EXE2COM refuses
+TINY = ('T_INT',)
 TIMEOUT = 120    # seconds per program
 # process exit status each test must end with (default 0)
 EXPECT_EXIT = {'T_SPAWN': 3}
 LADDER = 10      # IF ERRORLEVEL 10 .. 1
 
 
+def models(t):
+    """The models test t is built in."""
+    return MODELS + ('t' if t in TINY else '')
+
+
 def batch(t, m):
-    """GO.BAT for test t in model m."""
-    bat = ['@echo off',
-           'WCC %s.C /m%s /zq > CC.LOG' % (t, m),
-           'WLINK FILE %s NAME %s > LINK.LOG' % (t, t),
-           'IF NOT EXIST %s.EXE GOTO NOEXE' % t,
-           '%s.EXE > RUN.OUT' % t]
+    """GO.BAT for test t in model m (t: tiny, a .COM)."""
+    if m == 't':
+        bat = ['@echo off',
+               'WCC %s.C /ms /zq > CC.LOG' % t,
+               r'WLINK FILE D:\LIB\CSTART_T,%s NAME %s > LINK.LOG' % (t, t),
+               'EXE2COM %s > E2C.LOG' % t,
+               'IF NOT EXIST %s.COM GOTO NOEXE' % t,
+               '%s.COM > RUN.OUT' % t]
+    else:
+        bat = ['@echo off',
+               'WCC %s.C /m%s /zq > CC.LOG' % (t, m),
+               'WLINK FILE %s NAME %s > LINK.LOG' % (t, t),
+               'IF NOT EXIST %s.EXE GOTO NOEXE' % t,
+               '%s.EXE > RUN.OUT' % t]
     # DOS 3.x has no %ERRORLEVEL%; and "IF ... ECHO x > FILE" truncates
     # FILE before testing, so branch instead
     bat += ['IF ERRORLEVEL %d GOTO E%d' % (n, n)
@@ -67,12 +90,26 @@ def expected_exit(t):
     return 'EXIT=%d%s' % (min(n, LADDER), '+' if n >= LADDER else '')
 
 
+MARKER = re.compile(r'EXIT=\d+\+?$')
+
+
 def program_output(t, lines):
-    """(output without the EXIT= and DONE lines, None) or (None, why)."""
+    """(output without the EXIT= and DONE lines, None) or (None, why).
+    When the program's last line has no newline, the batch file's EXIT=
+    marker is appended to it ('last textEXIT=0'): if no line is a marker
+    but exactly one ends with one, it is split into the program's line
+    and the marker."""
     if not lines or lines[-1] != 'DONE':
         return None, 'incomplete (no DONE)'
     if 'NO-EXE' in lines:
         return None, 'not linked (NO-EXE)'
+    if not any(MARKER.match(x) for x in lines):
+        ends = [n for n, x in enumerate(lines) if MARKER.search(x)]
+        if len(ends) == 1:
+            n = ends[0]
+            m = MARKER.search(lines[n])
+            lines = lines[:n] + [lines[n][:m.start()], m.group()] + \
+                lines[n + 1:]
     exits = [x for x in lines if x.startswith('EXIT=')]
     if len(exits) != 1 or lines[-2] != exits[0]:
         return None, 'exit status not recorded once (%s)' % exits
@@ -91,14 +128,15 @@ def report(tests, finished=None):
     for t in tests:
         outs = {}
         bad = {}
-        for m in MODELS:
+        for m in models(t):
             d = os.path.join(WORK, '%s%s' % (t[:7], m.upper()))
-            for log in ('CC.LOG', 'LINK.LOG'):
+            for log in ('CC.LOG', 'LINK.LOG', 'E2C.LOG'):
                 p = os.path.join(d, log)
                 text = open(p, errors='replace').read() if \
                     os.path.exists(p) else ''
+                # E2C.LOG (model t): EXE2COM's refusal names relocations
                 if 'Error!' in text or 'undefined' in text or \
-                        '*** Error' in text:
+                        '*** Error' in text or 'relocation' in text:
                     print('%s /m%s %s:\n%s' % (t, m, log, text.strip()))
                     status = 1
             if finished is not None and not finished.get(d):
@@ -113,17 +151,17 @@ def report(tests, finished=None):
         if bad:
             status = 1
             print('%-8s FAILED: %s' % (t, '; '.join(
-                '/m%s %s' % (m, bad[m]) for m in MODELS if m in bad)))
+                '/m%s %s' % (m, bad[m]) for m in models(t) if m in bad)))
             continue
         ref = outs['m']
-        same = all(outs[m] == ref for m in MODELS)
+        same = all(outs[m] == ref for m in models(t))
         print('%-8s %s (%d lines, %s)' % (t, 'all models agree' if same else
                                           'DIFFER', len(ref),
                                           expected_exit(t)))
         if not same:
             status = 1
-            for m in 'scl':
-                if outs[m] != ref:
+            for m in models(t):
+                if m != 'm' and outs[m] != ref:
                     for line in difflib.unified_diff(
                             ref, outs[m], 'medium', m, lineterm='', n=0):
                         print('   ' + line)
@@ -143,7 +181,7 @@ def main(argv):
         shutil.rmtree(WORK)
     jobs = []
     for t in tests:
-        for m in MODELS:
+        for m in models(t):
             d = os.path.join(WORK, '%s%s' % (t[:7], m.upper()))
             os.makedirs(d)
             shutil.copy(os.path.join(paths.ROOT, 'tests', t + '.C'),

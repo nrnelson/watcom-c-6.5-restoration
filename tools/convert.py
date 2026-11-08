@@ -13,8 +13,11 @@ compact = wcc /mc /s):
 
 records
   LNAMES   drop the code group name CLIBM; the code segment (CLIBM_TEXT,
-           <MODULE>_TEXT) becomes _TEXT; indexes renumbered
-  SEGDEF   name/class indexes renumbered, code length recomputed
+           <MODULE>_TEXT) becomes _TEXT; a code segment of another name
+           (CODE) keeps it and _TEXT is appended; indexes renumbered
+  SEGDEF   name/class indexes renumbered, code length recomputed; a code
+           segment not named *_TEXT is given the appended _TEXT
+  FIXUPP   (renamed segment) a frame of the code segment -> F5
   GRPDEF   the code group (CLIBM) is dropped, the others renumbered
   EXTDEF   _big_code_ -> _small_code_
   PUBDEF   base group of the code group -> 0
@@ -23,7 +26,7 @@ records
            renumbered; positions and code displacements relocated
 code
   CALL FAR ptr (9A) -> CALL near (E8); JMP FAR ptr (EA) -> JMP near (E9)
-  RETF -> RET, RETF n -> RET n
+  RETF -> RET, RETF n -> RET n; a RETF used as a far jump stays
   [bp+d] at or above the return address: d - 2 (near return address)
   relative branches recomputed; JMP near that now fits rel8 -> JMP short
   LEDATA   C modules: 189-byte chunks; a fixup is never split
@@ -206,16 +209,59 @@ def imm_value(code, x):
     return n
 
 
+# add, or, adc, sbb, and, sub, xor r16 with ModR/M: 01 etc. write the r/m
+# operand, 03 etc. the reg operand (cmp, 39/3B, writes nothing)
+ALU_RM16 = (0x01, 0x09, 0x11, 0x19, 0x21, 0x29, 0x31)
+ALU_REG16 = (0x03, 0x0B, 0x13, 0x1B, 0x23, 0x2B, 0x33)
+
+
 def writes_bp(x):
     """True when x writes BP other than by pop bp (mov, xchg, lea, lds/les,
-    inc/dec, arithmetic with BP as destination)."""
+    inc/dec, arithmetic with BP as destination: add/or/adc/sbb/and/sub/xor
+    with an immediate or a register, not/neg, shifts and rotates, and the
+    80186 imul and shift by an immediate; cmp writes nothing).  Also mov
+    bp,imm16 in its C7 form."""
     op = x.op
+    bp_rm = x.mod == 3 and x.rm == 5
     return (op == 0x8B and x.reg == 5) or \
-        (op == 0x89 and x.mod == 3 and x.rm == 5) or \
-        (op == 0x87 and (x.reg == 5 or (x.mod == 3 and x.rm == 5))) or \
+        (op == 0x89 and bp_rm) or \
+        (op == 0x87 and (x.reg == 5 or bp_rm)) or \
         op in (0x95, 0xBD, 0x45, 0x4D) or \
         (op in (0x8D, 0xC4, 0xC5) and x.reg == 5) or \
-        (op in (0x81, 0x83) and x.mod == 3 and x.rm == 5 and x.reg != 7)
+        (op in (0x81, 0x83) and bp_rm and x.reg != 7) or \
+        (op in ALU_RM16 and bp_rm) or \
+        (op in ALU_REG16 and x.reg == 5) or \
+        (op == 0xF7 and bp_rm and x.reg in (2, 3)) or \
+        (op in (0xD1, 0xD3, 0xC1) and bp_rm) or \
+        (op in (0x69, 0x6B) and x.reg == 5) or \
+        (op == 0xC7 and bp_rm)
+
+
+BP_WRITES = {0x87, 0x89, 0x8F, 0xC7, 0x8C}   # xchg, mov r/imm/sreg->m, pop m
+
+
+def plants_retf(code, block):
+    """True when block, the straight-line instructions between a mov sp,bp
+    and a RETF, writes both words the RETF pops: after mov sp,bp and until
+    BP is written, [bp+d] is the stack slot at sp+d, so with k pops before
+    the RETF it pops [bp+2k] and [bp+2k+2].  Such a RETF is a far jump
+    (CHAININT: xchg the handler into the saved CX and AX slots, pop the
+    registers, retf).  Writes before the mov sp,bp do not count."""
+    pops = 0
+    written = set()
+    live = True
+    for z in block:
+        if z.op in POPS or z.op == 0x8F:
+            pops += 1
+        if live and z.op in BP_WRITES and z.mod in (1, 2) and z.rm == 6:
+            d = code[z.disp] if z.dispsz == 1 else \
+                code[z.disp] | code[z.disp + 1] << 8
+            if z.dispsz == 1 and d > 127:
+                d -= 256
+            written.add(d)
+        if writes_bp(z) or z.op == 0x5D:
+            live = False
+    return 2 * pops in written and 2 * pops + 2 in written
 
 
 def frame_thresholds(code, order, starts, asm_entries=None, insns=None,
@@ -288,7 +334,8 @@ def frame_thresholds(code, order, starts, asm_entries=None, insns=None,
         if x.off in inert or x.off == frame_mov:
             continue
         op = x.op
-        if op in PUSHES or op == 0x9C or (op == 0xFF and x.reg == 6):
+        if op in PUSHES or op in (0x68, 0x6A, 0x9C) or \
+                (op == 0xFF and x.reg == 6):
             depth += 1
             if op == 0x55 and bp_frame:
                 saved = depth
@@ -656,7 +703,11 @@ def convert_code(code, fixups, entries, notes, frames=True,
                                                       0x9D, 0x8F):
                 depth -= 1
             elif code[y.off:y.off + 2] in (b'\x89\xec', b'\x8b\xe5'):
-                break           # mov sp,bp: an ordinary epilogue
+                # mov sp,bp: an ordinary epilogue, unless the block after
+                # it plants the two words the RETF pops
+                if plants_retf(code, order[m + 1:n]):
+                    depth = 2
+                break
             elif y.op in (0x81, 0x83) and y.mod == 3 and y.rm == 4 and \
                     y.reg in (0, 5):
                 # add/sub sp,n: words released or reserved
@@ -893,16 +944,27 @@ def convert(recs, big='CLIBM'):
     drop = set()
     if code_grp:
         drop.add(grps[code_grp - 1]['name'])
+    # near code has one code segment: the code segment becomes _TEXT
+    # whatever its name.  A name ending in _TEXT is renamed in place; any
+    # other name (DOINTR's CODE, which is also its class name) is kept for
+    # its other uses and _TEXT is appended for the segment (METHOD.md 7.1)
+    segname = segs[code_seg - 1]['name'] if code_seg else None
+    renamed = bool(segname) and not names[segname - 1].endswith('_TEXT')
     newnames = []
     lmap = {0: 0}
     for i, s in enumerate(names, 1):
         if i in drop:
             continue
-        if code_seg and segs[code_seg - 1]['name'] == i and \
-                s.endswith('_TEXT'):
+        if i == segname and not renamed:
             s = '_TEXT'
         newnames.append(s)
         lmap[i] = len(newnames)
+    text_name = None
+    if renamed:
+        if '_TEXT' not in newnames:
+            newnames.append('_TEXT')
+        text_name = newnames.index('_TEXT') + 1
+        notes.append('code-segment-renamed')
     gmap = {0: 0}
     k = 0
     for n, g in enumerate(grps, 1):
@@ -977,6 +1039,13 @@ def convert(recs, big='CLIBM'):
                 g.pop('fl', None)
             else:
                 g['fdatum'] = ng
+        elif renamed and not f['F'] and f['frame'] == 0 and \
+                f['fdatum'] == code_seg:
+            # frame given as the renamed code segment: written as frame of
+            # the target, as for the dropped code group (METHOD.md 7.1)
+            g['frame'] = 5
+            del g['fdatum']
+            g.pop('fl', None)
         if not f['T'] and f['targt'] == 1:
             ng = gmap[f['tdatum']]
             if ng is None:
@@ -1034,6 +1103,8 @@ def convert(recs, big='CLIBM'):
             x['ovl'] = lmap[r['ovl']]
             if code_seg and r is segs[code_seg - 1]:
                 x['length'] = len(newcode)
+                if text_name:
+                    x['name'] = text_name
             return x
         if t == 0x9A:
             if grps.index(r) + 1 == code_grp:

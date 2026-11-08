@@ -112,15 +112,15 @@ CLIBS,109,EXECL,37856,240,0,inferred,convert,medium,,,
 CLIBS,110,EXECADDR,38096,160,0,inferred,unchanged,low,,convert(other bytes),model-independent
 CLIBS,111,EOF,38256,272,0,inferred,convert,medium,,,
 CLIBS,112,ENABLE,38528,176,0,inferred,convert,medium,,,
-CLIBS,113,D_SETVECT,38704,208,0,inferred,convert,medium,,,name-case-from-dictionary
-CLIBS,114,D_KEEP,38912,192,0,inferred,convert,medium,,,name-case-from-dictionary
-CLIBS,115,D_GETVECT,39104,208,0,inferred,convert,medium,,,name-case-from-dictionary
+CLIBS,113,d_setvect,38704,208,0,inferred,convert,medium,,,name-case-from-dictionary
+CLIBS,114,d_keep,38912,192,0,inferred,convert,medium,,,name-case-from-dictionary
+CLIBS,115,d_getvect,39104,208,0,inferred,convert,medium,,,name-case-from-dictionary
 CLIBS,116,DUP2,39312,256,0,inferred,convert,medium,,,
 CLIBS,117,DUP,39568,256,0,inferred,convert,medium,,,
 CLIBS,118,DOSRET,39824,384,0,inferred,convert,medium,,,
 CLIBS,119,DOSPAWN,40208,624,0,inferred,convert,medium,,,assembler
 CLIBS,120,DOSEXTER,40832,272,0,inferred,convert,medium,,,
-CLIBS,121,DOINTR,41104,352,0,inferred,convert,low,,,assembler call-far-indirect guessed-code
+CLIBS,121,DOINTR,41104,352,0,inferred,convert,low,,,assembler call-far-indirect code-segment-renamed guessed-code
 CLIBS,122,DOEXEC,41456,816,0,inferred,convert,low,,,assembler jmp-far-indirect
 CLIBS,123,DISABLE,42272,192,0,inferred,convert,medium,,,
 CLIBS,124,DIR,42464,496,0,inferred,convert,medium,,,
@@ -130,7 +130,7 @@ CLIBS,127,CLOSE,43552,256,0,inferred,convert,medium,,,
 CLIBS,128,CLOCK,43808,336,0,inferred,convert,medium,,,
 CLIBS,129,CHMOD,44144,240,0,inferred,convert,medium,,,
 CLIBS,130,CHDIR,44384,224,0,inferred,convert,medium,,,
-CLIBS,131,CHAININT,44608,96,0,inferred,convert,medium,,,assembler
+CLIBS,131,CHAININT,44608,96,0,inferred,convert,medium,,,assembler retf-jump-kept
 CLIBS,132,CENVARG,44704,848,0,inferred,convert,medium,,,overlapping-insns
 CLIBS,133,BREAK,45552,208,0,inferred,convert,medium,,,
 CLIBS,134,BDOS,45760,192,0,inferred,convert,medium,,,
@@ -147,11 +147,11 @@ CLIBS,144,STRUPR,48176,208,0,inferred,convert,medium,,,
 CLIBS,145,STRTOL,48384,752,0,inferred,convert,medium,,,
 CLIBS,146,STRTOK,49136,368,0,inferred,convert,medium,,,
 CLIBS,147,STRSTR,49504,336,0,inferred,convert,medium,,,overlapping-insns
-CLIBS,148,STRSPN,49840,288,0,inferred,convert,medium,,,name-case-from-dictionary
+CLIBS,148,strspn,49840,288,0,inferred,convert,medium,,,name-case-from-dictionary
 CLIBS,149,STRSET,50128,192,0,inferred,convert,medium,,,
 CLIBS,150,STRREV,50320,240,0,inferred,convert,medium,,,
 CLIBS,151,STRRCHR,50560,208,0,inferred,convert,medium,,,
-CLIBS,152,STRPBRK,50768,288,0,inferred,convert,medium,,,name-case-from-dictionary
+CLIBS,152,strpbrk,50768,288,0,inferred,convert,medium,,,name-case-from-dictionary
 CLIBS,153,STRNSET,51056,208,0,inferred,convert,medium,,,
 CLIBS,154,STRNICMP,51264,272,0,inferred,convert,medium,,,
 CLIBS,155,STRNCPY,51536,224,0,inferred,convert,medium,,,
@@ -163,7 +163,7 @@ CLIBS,160,STRICMP,52656,240,0,inferred,convert,medium,,,
 CLIBS,161,STRFTIME,52896,2000,0,inferred,convert,medium,,,stack-check-size
 CLIBS,162,STRERROR,54896,704,0,inferred,convert,medium,,,
 CLIBS,163,STRDUP,55600,256,0,inferred,convert,medium,,,
-CLIBS,164,STRCSPN,55856,288,0,inferred,convert,medium,,,name-case-from-dictionary
+CLIBS,164,strcspn,55856,288,0,inferred,convert,medium,,,name-case-from-dictionary
 CLIBS,165,STRCPY,56144,224,0,inferred,convert,medium,,,overlapping-insns
 CLIBS,166,STRCOLL,56368,224,0,inferred,convert,medium,,,
 CLIBS,167,STRCMP,56592,224,0,inferred,convert,medium,,,
@@ -370,7 +370,7 @@ CLIBC,117,DUP,41536,256,0,inferred,convert,medium,,,
 CLIBC,118,DOSRET,41792,400,0,inferred,convert,medium,,,
 CLIBC,119,DOSPAWN,42192,624,0,inferred,convert,medium,,,assembler
 CLIBC,120,DOSEXTER,42816,272,0,inferred,convert,medium,,,
-CLIBC,121,DOINTR,43088,352,0,inferred,convert,low,,,assembler call-far-indirect guessed-code
+CLIBC,121,DOINTR,43088,352,0,inferred,convert,low,,,assembler call-far-indirect code-segment-renamed guessed-code
 CLIBC,122,DOEXEC,43440,816,0,inferred,convert,low,,,assembler jmp-far-indirect
 CLIBC,123,DISABLE,44256,192,0,inferred,convert,medium,,,
 CLIBC,124,DIR,44448,592,0,inferred,convert,medium,,,
@@ -380,7 +380,7 @@ CLIBC,127,CLOSE,45632,256,0,inferred,convert,medium,,,
 CLIBC,128,CLOCK,45888,352,0,inferred,convert,medium,,,
 CLIBC,129,CHMOD,46240,240,0,inferred,convert,medium,,,
 CLIBC,130,CHDIR,46480,224,0,inferred,convert,medium,,,
-CLIBC,131,CHAININT,46704,96,0,inferred,convert,medium,,,assembler
+CLIBC,131,CHAININT,46704,96,0,inferred,convert,medium,,,assembler retf-jump-kept
 CLIBC,132,CENVARG,46800,1024,0,inferred,convert,medium,,,overlapping-insns
 CLIBC,133,BREAK,47824,208,0,inferred,convert,medium,,,
 CLIBC,134,BDOS,48032,192,0,inferred,convert,medium,,,

@@ -152,12 +152,21 @@ uninformative.
 - A sector equal to the other damaged library at an *unaligned* offset is
   genuine: CLIBS and CLIBC share many identical near-code modules, shifted
   by earlier size differences.  These modules parse and checksum.
-- A lone unmatched sector between two foreign runs is foreign too.  The
-  three such sectors in CLIBS were inspected: one holds 8086 code, one a
-  ctype table followed by "Unable to open '%s'", one README-style text
-  about a mouse driver.  None is library content.  This is an inference
-  from inspection, not a match: of CLIBS's 96 foreign sectors, 93 match
-  other files' bytes and these 3 match nothing.
+- A sector that matches no file whole but splits in two is foreign (a
+  "split" sector): for some file A, the sector's offset o satisfies o <
+  len(A) < o + 512 and the sector's bytes up to len(A) equal A's at the
+  same offsets, and for some file B the rest of the sector equals B's bytes
+  at the same offsets.  The end of one file and the start of the next
+  file's run, at the same offsets, as the copy went from one file to the
+  next.  CLIBS has three, one between each pair of its foreign runs:
+
+  | sector | end of A, same offsets | then B, same offsets |
+  |---|---|---|
+  | 19968-20480 | 19968-20080 DISK3/WDISASM.EXE (20080 bytes long) | 20080-20480 DISK3/WMAKE.EXE |
+  | 28672-29184 | 28672-28978 DISK3/WMAKE.EXE (28978 bytes long) | 28978-29184 DISK3/WLINK.EXE |
+  | 38400-38912 | 38400-38528 DISK3/WLINK.EXE (38528 bytes long) | 38528-38912 DISK3/WVIDEO.HLP |
+
+  So all 96 foreign CLIBS sectors match other files' bytes.
 
 **Result.**
 
@@ -167,10 +176,10 @@ uninformative.
 | foreign | 96 sectors, 49152 bytes | 101 sectors, 51712 bytes |
 | dictionary | at 86528, 19 blocks, genuine | at 91648, 19 blocks, genuine |
 
-CLIBS foreign runs (all at the same offsets in the named files):
-14336-19968 DISK3/WDISASM.EXE; 19968-20480 unknown; 20480-28672
-DISK3/WMAKE.EXE; 28672-29184 unknown; 29184-38400 DISK3/WLINK.EXE;
-38400-38912 unknown; 38912-63488 DISK3/WVIDEO.HLP.
+CLIBS foreign runs (all at the same offsets in the named files, each run
+ending at its file's length): 14336-20080 DISK3/WDISASM.EXE; 20080-28978
+DISK3/WMAKE.EXE; 28978-38528 DISK3/WLINK.EXE; 38528-63488
+DISK3/WVIDEO.HLP.  All 49152 foreign bytes match.
 
 CLIBC foreign runs: 11776-22016 DISK4/MATHM.LIB (same offset); 22016-37376
 the last 15360 bytes of DISK4/CLIBM.LIB (its last modules and its
@@ -278,9 +287,18 @@ them.
 
 - **LNAMES**: the code group name `CLIBM` is removed and the code segment
   (`CLIBM_TEXT`, or `<MODULE>_TEXT` in large) becomes `_TEXT`; every name
-  index is renumbered.
+  index is renumbered.  Near code has one code segment, so every
+  CODE-class segment becomes `_TEXT`, whatever its name.  One module's is
+  not named `*_TEXT`: the assembler module DOINTR's segment is named
+  `CODE` (LNAMES `['', 'CODE']`, SEGDEF name 2, class 2), the only such
+  module in CLIBM and CLIBL.  Its name is also its class name, so it is
+  kept and `_TEXT` is appended (LNAMES `['', 'CODE', '_TEXT']`), as
+  Watcom's own assembler modules do for a `_TEXT` segment (CHAININT in
+  CLIBM has exactly these LNAMES).
 - **SEGDEF**: name, class and overlay indexes renumbered; the code
-  segment's length is the new code length.
+  segment's length is the new code length.  A code segment renamed from a
+  name not ending in `_TEXT` points at the appended `_TEXT` (DOINTR: name
+  3, class 2, ACBP unchanged).
 - **GRPDEF**: the `CLIBM` group (over the code segment) is dropped; the
   remaining groups (DGROUP) are renumbered.
 - **EXTDEF**: the model marker `_big_code_` becomes `_small_code_`.
@@ -291,7 +309,20 @@ them.
   frame given by the code group becomes "frame of the target" (F5); group
   indexes are renumbered; fixup positions and code displacements in fixups
   are relocated to the new code.  Found from a count of every fixup kind in
-  the surviving pairs, which showed one consistent mapping.
+  the surviving pairs, which showed one consistent mapping.  In a module
+  whose code segment was renamed from a name not ending in `_TEXT`, a frame
+  given explicitly as the code segment (F0) is also written as F5, with no
+  frame datum: the same meaning for the linker.  DOINTR's 15 cs-relative
+  scratch fixups are the case; the modules that keep explicit F0 frames
+  on a `_TEXT` segment (CSTART, STK, IFS, I4D, FSMATH, FSI, FDMATH, FDC,
+  AMODF) are survivors reproduced exactly and are not touched.  The
+  encoding is forced by the dictionary: DOINTR's page span is 352 bytes in
+  both libraries; a verbatim rename (LNAMES 6 bytes longer, F0 frames
+  kept) makes the module 354 bytes, which does not fit, and the F5 form
+  makes it 339 (from 348).  So the original small and compact DOINTR was
+  not simply the donor source assembled with `_TEXT`; its real record
+  encoding is unknown, and the module stays `low`.  Before this rule
+  DOINTR's segment kept the name `CODE` (section 13).
 - **COMENT default-library request**: `L5MATHM` becomes `L5MATHS`,
   `L5MATHL` becomes `L5MATHC`.  Found by testing: small programs using
   `scanf` pulled in MATHM.LIB.
@@ -326,9 +357,28 @@ Each with the evidence that established it:
 - **RETF to RET, RETF n to RET n** (`CB` to `C3`, `CA` to `C2`, same n).
   Except a RETF used as a far jump: when the instructions before it in the
   same block push a segment and offset (net two or more words, counting
-  `add/sub sp` and stopping at `mov sp,bp`) or switch stacks, it stays
-  RETF.  DOEXEC's stubs that start a loaded program, and the INT emulation
-  below, are the cases.
+  `add/sub sp`) or switch stacks, it stays RETF.  DOEXEC's stubs that start
+  a loaded program, and the INT emulation below, are the cases.  A `mov
+  sp,bp` in the block is an ordinary epilogue unless the instructions
+  between it and the RETF plant the two words the RETF pops: after `mov
+  sp,bp`, and until an instruction writes BP (or `pop bp`), `[bp+d]` is
+  the stack slot at sp+d, so with k pops (`58-5F`, `07`, `17`, `1F`, `9D`,
+  `8F`) before the RETF it pops `[bp+2k]` and `[bp+2k+2]`; if both were
+  written in that window (`87` xchg, `89` mov r to m, `8F` pop m, `C7` mov
+  imm to m, `8C` mov sreg to m, with ModR/M mod 1 or 2, rm 6), the RETF is
+  a far jump and stays (note `retf-jump-kept`).  Writes before the `mov
+  sp,bp` do not count (INT86 and INT86X write `[bp+0..10]` there through a
+  repurposed BP).  CHAININT (`_chain_intr`) is the case: `mov sp,bp` to
+  the interrupt handler's frame, `xchg [bp+10h],cx` and `xchg [bp+12h],ax`
+  into the saved CX and AX slots, eight pops, RETF to the previous
+  handler.  Over every CLIBM and CLIBL module the rule fires on CHAININT
+  only.  The evidence that this RETF is what small code had: DISK2/WCPP.EXE
+  holds the small-model SIGNAL code (section 17), whose near call at file
+  offset 0x6776 reaches 0x6870, where the 21 bytes equal CLIBM's CHAININT
+  byte for byte, ending in `CB` at 0x6884; the same 21 bytes are in
+  DISK1/WCC.EXE at 0x3038 and DISK7/WCEXP.EXE at 0x5DA8.  Before this
+  rule `mov sp,bp` always ended the scan and the RETF became RET
+  (section 13).
 - **`push cs; call near` to `call near`**: medium calls a far function in
   the same segment this way (LTOA, ITOA).  Except `pushf; push cs; call`:
   inline code in INT86/INT86X that emulates an `INT`, whose callee ends
@@ -455,7 +505,7 @@ order, with LEDATA up to 1020 bytes.
 The converter records every non-trivial thing it did or could not do as a
 note in the provenance (e.g. `call-far-indirect`, `cross-jump`,
 `stack-check-size`, `overlapping-insns`, `guessed-code`,
-`code-segment-ref`).  Section 8 measures how often modules with each note
+`code-segment-ref`, `code-segment-renamed`, `retf-jump-kept`).  Section 8 measures how often modules with each note
 were exact; section 10 turns that into confidence levels.
 
 
@@ -617,8 +667,10 @@ converter strongly but is not an independent prediction.
 **Confidence levels** in the provenance: `high` = recompiled with CLIBM and
 CLIBL exact, or the cross route; `medium` = converted with no risky note,
 or a near-exact recompile; `low` = converted through code-pointer
-constructs, or depending on a decision.  Low in both libraries: SPAWNVE,
-EXECADDR, DOINTR, DOEXEC, INT86, INT86X, SETVBUF.
+constructs (notes such as `call-far-indirect`, `code-segment-ref`), a
+renamed code segment whose record encoding cannot be the original's
+(`code-segment-renamed`, section 7.1), or depending on a decision.  Low in
+both libraries: SPAWNVE, EXECADDR, DOINTR, DOEXEC, INT86, INT86X, SETVBUF.
 
 
 ## 11. Decisions, with the evidence for each
@@ -645,7 +697,14 @@ EXECADDR, DOINTR, DOEXEC, INT86, INT86X, SETVBUF.
    SPAWNVE's callees it is the only one that stays internally consistent:
    EXECADDR calls nothing and returns the 4-byte exec hook in DX:AX in
    every model.  The first choice, DOSPAWN, was refuted (section 13).
-   Small SPAWNVE fits either way.
+   Small SPAWNVE fits either way.  The shipped programs support it: the
+   far call in small SPAWNVE has counterparts in DISK1/WCL.EXE at file
+   offset 0x1DCB and DISK3/WMAKE.EXE at 0x4D7E (where small SPAWNVE is
+   found, section 17), both with DOS loader relocations on the segment
+   word, and their targets (0x2084 and 0x5037) load two adjacent words
+   into AX and DX and end in RETF, as inferred for EXECADDR.  This
+   supports the decision; it does not verify P_OVERLAY's success path
+   (section 16).
 4. **SETJMP's small-code bytes** (section 9) are inferred.
 5. **The six lower-case CLIBS modules** are rebuilt from CLIBM with the
    dictionary's names; a separate compile may have used other sources,
@@ -659,11 +718,15 @@ EXECADDR, DOINTR, DOEXEC, INT86, INT86X, SETVBUF.
 Tool: `tools/difftest.py`; programs in `tests/`.  Each program is compiled
 by 6.5 in the small, compact, medium and large models and linked by
 WLINK 4.1: small and compact against the rebuilt libraries, medium and
-large against the intact originals.  Each runs in its own DOSBox-X
+large against the intact originals.  T_INT is also built as a tiny-model
+.COM: compiled `/ms`, linked after the shipped startup object
+`LIB/CSTART_T.OBJ` against the rebuilt CLIBS.LIB, converted by `EXE2COM`.
+T_CHAIN cannot be: a 6.5 interrupt function loads DS with the segment of
+DGROUP, a relocation EXE2COM refuses.  Each runs in its own DOSBox-X
 instance.  Each run must finish in the emulator, the batch file records
 the program's exit status and a completion marker, and the status must be
-the expected one (3 for T_SPAWN, 0 for the others); then the four outputs
-must be identical.  All six agree:
+the expected one (3 for T_SPAWN, 0 for the others); then every output
+must be identical to the medium one.  All seven agree:
 
 - T_STR: string and memory functions, ctype, atoi/atol/strtol/strtoul,
   itoa/ltoa/ultoa, div/ldiv, rand, qsort, bsearch, many printf/sprintf/
@@ -678,18 +741,78 @@ must be identical.  All six agree:
   raise, malloc/free/realloc/calloc, _fmalloc/_ffree, halloc/hfree,
   putenv/getenv, intdos, stackavail, atexit order.
 - T_SPAWN: spawnl and spawnlp (P_WAIT), a missing program, execl.
-- T_INT: int86, int86x, intdos and intdosx with a failing DOS call (close
-  handle FFFFh: AX=6, carry set, return value 6, as the intact medium and
-  large libraries give), a succeeding one (close a real handle) and the
-  DOS version call, every register printed; it exits 1 if a promised value
-  is wrong.  With the pre-audit CLIBC its compact build fails.
+- T_INT: int86, int86x, intdos, intdosx and intr with a failing DOS call
+  (close handle FFFFh: AX=6, carry set, return value 6, as the intact
+  medium and large libraries give), a succeeding one (close a real handle)
+  and the DOS version call, every register printed; it exits 1 if a
+  promised value is wrong.  Around the failing `intr` call it fills
+  CS:00A6h-00B1h with 90h and counts the bytes that change, which must be
+  none: DOINTR's CS-relative scratch lands there when DOINTR is not in the
+  caller's code segment.  The first function in the file is a 192-byte NOP
+  pad that never runs, so in small and compact those offsets are dead code
+  (the test's object is the first in `_TEXT`, so the pad starts at offset
+  0, and DOINTR is never at offset 0); in the tiny .COM they are the PSP
+  command tail.
+- T_CHAIN: `_chain_intr`, `_dos_getvect` and `_dos_setvect`.  Two
+  interrupt handlers on INT 60h; the first chains to the second through
+  `_chain_intr`.  The check calibrates itself: the second handler records
+  how far its SP is below the SP taken just before `int 60h`, once when
+  installed directly and once when reached through the chain; the two
+  must be equal, and when they are not the handler ends the program with
+  exit status 7 rather than return through a wrong stack.  Only counts and
+  comparisons are printed.
 
 Faults these tests found in earlier versions of the rebuild, all fixed:
 SCNF's default-library request (small programs linked MATHM.LIB);
 EXECVE's far call through the near `_int23_exit` (exec crashed); the
-DOSPAWN hypothesis (spawn crashed, section 13).  The compact `int86`/
-`int86x` fault (section 13) was not found by these tests but by the
-audit; T_INT was added for it.
+DOSPAWN hypothesis (spawn crashed, section 13).  Tests were also added for
+three faults the earlier programs did not catch: the compact `int86`/`int86x`
+frame offsets (the `int86` and `int86x` part of T_INT); `intr`'s scratch stores
+in the caller's code segment (the `intr` part of T_INT and its tiny build); and
+`_chain_intr` returning near (T_CHAIN); all three in section 13.  On the
+earlier outputs that still have the last two faults (section 15), T_INT fails
+in small, compact and tiny (12 bytes changed, exit 1) and T_CHAIN in small and
+compact (exit 7).
+
+### Every module through the 1988 librarian and linker
+
+Tool: `tools/periodcheck.py`, run by `restore.py --test` after the
+programs.  The test programs pull in 156 of the 250 small and 155 of
+the 250 compact modules (by their link maps); the others had been read
+only by `tools/checklib.py`.  This tool hands every module of each restored
+library to Watcom's own 1988 tools in DOSBox-X:
+
+- **WLIB 1.1** extracts every module (a command file of `*NAME` lines,
+  `WLIB CLIBS @EXT`).  Each object written, identified by its THEADR
+  name, is byte-identical to the module's bytes in the library (THEADR
+  to MODEND): 250 of 250 in both libraries.  WLIB rewrites nothing, and
+  leaves the library unchanged.
+- **WLINK 4.1** links a generated program that takes the address of
+  every one of the library's 371 publics, against the library under test
+  and the intact MATH library, with a map.  WLINK 4.1 has no `REFERENCE`
+  directive, so the references are C (`extern void NAME(void); #pragma
+  aux NAME "*";`).  Every one of the 250 modules appears in the map's
+  memory map, in both libraries.  OVLLDR refers to `_OVLTAB`, which WLINK
+  builds only for an overlaid program, so the link has one overlay
+  section, with `OPTION SMALL` in near code (without it WLINK asks for
+  the far loader `_LOVLLDR`).  The link prints one message, `redefinition
+  of _FtoS_ ignored` for MATH's FTOS: FTOSX and FTOS both define
+  `_FtoS_`, and SCNF's reference to `_fltused_` pulls in FTOS.  The intact
+  CLIBM, CLIBL and CLIBH give the same message, and it is the only one the
+  tool accepts.
+
+The intact CLIBM, CLIBL and CLIBH pass both checks the same way
+(`python3 -I tools/periodcheck.py M L H`).  What this proves: the 1988
+librarian and linker accept every rebuilt module's records and resolve
+every public the dictionary names.  What it does not prove: that the code
+is right.  Wrong bytes in valid records pass, and the three runtime
+defects of sections 7.1 and 7.3 (compact `int86`/`int86x`, DOINTR's
+segment, CHAININT's RETF) were exactly that, so this check would not have
+caught any of them.  Neither WLIB 1.1 nor WLINK 4.1 checks record
+checksums either: a byte changed inside a record passes both, with or
+without its checksum corrected.  That is `checklib.py`'s job.  A changed
+public name fails the link, and a broken record length fails before the
+tools run.
 
 ## 13. Hypotheses that failed, and dead ends
 
@@ -702,17 +825,29 @@ audit; T_INT was added for it.
   but a strict checker walks modules sequentially and stops at the zero
   page.  Rejected: every module must fill its span.  A fallback that still
   accepted such a module when nothing else fitted remained in
-  `rebuild.py` (no published module used it); it was removed after the
-  audit.
-- **The frame ended at the inline interrupt stub** (a defect found by the
-  November 2026 audit).  The frame analysis treated every near-call
-  target as a new function and forgot the frame there, including the stub
-  that `pushf; push cs; call` reaches in INT86 and INT86X.  In compact
-  those modules then reloaded their output pointer from the wrong offset
-  after the interrupt, so a failing DOS call came back with carry clear
-  and a wrong return value.  Small was unaffected (medium keeps that
-  pointer at a negative offset).  Corrected by following BP through the
-  stub (section 7.3).
+  `rebuild.py` (no published module used it); it has been removed.
+- **The frame ended at the inline interrupt stub.**  The frame analysis treated
+  every near-call target as a new function and forgot the frame there,
+  including the stub that `pushf; push cs; call` reaches in INT86 and INT86X.
+  In compact those modules then reloaded their output pointer from the wrong
+  offset after the interrupt, so a failing DOS call came back with carry clear
+  and a wrong return value.  Small was unaffected (medium keeps that pointer at
+  a negative offset).  Corrected by following BP through the stub (section
+  7.3).
+- **DOINTR's `CODE` segment kept its name.**  The LNAMES rule renamed only
+  segments named `*_TEXT`, so DOINTR's code segment stayed `CODE`.  WLINK kept
+  it as a separate segment; the converted near call from INTR still reached it,
+  but CS stayed the caller's `_TEXT`, so DOINTR's 12 bytes of cs-relative
+  scratch (00A6h-00B1h) were written into the caller's code segment at those
+  offsets, or into the PSP command tail in a tiny-model .COM.  The registers
+  came back right, so nothing else noticed.  Corrected by giving every code
+  segment the name `_TEXT` (section 7.1).
+- **`mov sp,bp` always an epilogue in the RETF-as-jump rule.**  The backward
+  scan stopped at `mov sp,bp`, so CHAININT's final RETF, which consumes two
+  words planted after `mov sp,bp`, became RET: `_chain_intr` jumped to the
+  previous handler's offset in the current code segment and left its segment
+  word on the stack.  The INT 23h handler of the recompiled SIGNAL calls it.
+  Corrected by the window rule of section 7.3.
 - **A "RETF used as a jump" rule that counted `mov sp,bp` as a stack
   switch**: it turned normal epilogues into jumps and broke 17 surviving small modules;
   corrected (section 7.3).
@@ -752,22 +887,21 @@ low-confidence ones 0.30.
 | low | 0.30 | 7 | 2.1 | 7 | 2.1 |
 | **modules expected byte-identical** | | 250 | **228.5-235.2 (91-94%)** | 250 | **227.9-234.7 (91-94%)** |
 
-(The table published before the audit gave 92-94% for CLIBS and 90-93%
-for CLIBC without the arithmetic; the same weights applied to the counts
-of that time give 91.2-93.8% and 90.9-93.6%.  The audit fix moved INTDOSX
-from low to medium in both libraries.)  For bytes I put the figure at about 98% (CLIBS) and
-97-98% (CLIBC), on the view that a wrong module usually differs in a few
-bytes; that too is a judgment.  The chance that either whole library is
-byte-identical is close to zero.
+(An earlier version of this table gave 92-94% for CLIBS and 90-93% for CLIBC
+without the arithmetic; the same weights applied to the counts of that time
+give 91.2-93.8% and 90.9-93.6%.  The frame rule of section 7.3 has since moved
+INTDOSX from low to medium in both libraries.)  For bytes I put the figure at
+about 98% (CLIBS) and 97-98% (CLIBC), on the view that a wrong module usually
+differs in a few bytes; that too is a judgment.  The chance that either whole
+library is byte-identical is close to zero.
 
-The audit objected to two things, and both objections stand: the
-"high" modules (recompiled with CLIBM and CLIBL exact, or the cross route)
-are weighted below the "medium" ones, which is inconsistent with the
-labels; and a wrong module need not differ in a few bytes only, since a
-single changed instruction length shifts everything after it.  The
-numbers above should be read with that in mind.  Behaviour is better
-evidence than these numbers: every test agrees with the original medium
-and large libraries.
+Two objections to this estimate stand: the "high" modules (recompiled with
+CLIBM and CLIBL exact, or the cross route) are weighted below the "medium"
+ones, which is inconsistent with the labels; and a wrong module need not differ
+in a few bytes only, since a single changed instruction length shifts
+everything after it.  The numbers above should be read with that in mind.
+Behaviour is better evidence than these numbers: every test agrees with the
+original medium and large libraries.
 
 
 ## 15. Reproducing and checking the work
@@ -777,7 +911,7 @@ with the zip in the repository folder, Python and DOSBox-X:
 
 ```
 python3 restore.py             # everything, ending with the hash check
-python3 restore.py --test      # and the test programs in all four models
+python3 restore.py --test      # and the test programs in all four models (and tiny)
 ```
 
 The individual steps, each a tool that can be run alone:
@@ -791,6 +925,7 @@ python3 -I tools/recompile.py PRINTF SPRINTF SETJMP SIGNAL  # section 9
 python3 -I tools/rebuild.py -v              # section 10
 python3 -I tools/checklib.py out/CLIBS.LIB out/CLIBC.LIB
 python3 -I tools/difftest.py                # section 12
+python3 -I tools/periodcheck.py             # section 12
 ```
 
 Regression checks to run after any change to the tools:
@@ -804,21 +939,30 @@ python3 -I tools/selfcheck.py                   # the checker still bites
 change.  `selfcheck.py` damages `out/CLIBS.LIB` one byte at a time in
 memory (a record checksum, a dictionary name, the end record's payload and
 its length) and fails unless `checklib.py` rejects each for that reason.
-The test programs include T_INT (section 12), which fails on the
-pre-audit compact library.
+The test programs include T_INT and T_CHAIN (section 12), which fail on
+the earlier outputs below: the `int86` and `int86x` part of T_INT on the
+first compact library, and the `intr` part of T_INT and T_CHAIN on every
+earlier small and compact library.
 
 Expected results: `out/CLIBS.LIB` SHA-256
-`95100563d6885e7f0eba7c1a96aa0587bdf2fbe9ef8bfbaf73a367f85216b8c0`,
+`6cd1fee804d12b2e811709f6f2042354c0b80ea444e97257e377fb9e57bf3a81`,
 `out/CLIBC.LIB` SHA-256
-`69e6fe1e9b4e0f2b50e047c24c2678fe564c773ead325356376ddce794d9d58b`
-(before the audit fix of sections 7.3 and 13 it was
-`b53e05b77252a952e0896abc3612846bae2a10f4c584d1fa682e752b6e24bcae`).
+`9fea459aaaf22ef2feb5284f39c22244ad49312f2330684871566779c06445ae`.
+Earlier outputs: CLIBS
+`95100563d6885e7f0eba7c1a96aa0587bdf2fbe9ef8bfbaf73a367f85216b8c0`,
+before DOINTR's code segment was named `_TEXT` (section 7.1) and
+CHAININT's final RETF was restored (section 7.3); CLIBC
+`b53e05b77252a952e0896abc3612846bae2a10f4c584d1fa682e752b6e24bcae`,
+before the frame rule of section 7.3 corrected the `int86` and `int86x`
+offsets, then
+`69e6fe1e9b4e0f2b50e047c24c2678fe564c773ead325356376ddce794d9d58b`,
+before the same two changes as CLIBS.
 The whole process is deterministic: the same zip gives the same bytes on
 any machine.
 
 DOSBox-X configured as DOS 3.10 is an emulator reporting that version,
-not a booted copy of DOS 3.10.  The audit also ran its `int86`/`int86x`
-probes under Compaq DOS 3.10 booted in QEMU, with the same results.
+not a booted copy of DOS 3.10.  The `int86`/`int86x` probes were also
+run under Compaq DOS 3.10 booted in QEMU, with the same results.
 
 Ways to check the work independently:
 
@@ -854,7 +998,8 @@ Tools:
 | `tools/rebuild.py` | builds `out/CLIBS.LIB`, `out/CLIBC.LIB`, `out/PROVENANCE.csv` |
 | `tools/checklib.py` | strict sequential check of a library |
 | `tools/selfcheck.py` | shows `checklib.py` rejects one-byte damage |
-| `tools/difftest.py` | builds and runs `tests/` in all four models |
+| `tools/difftest.py` | builds and runs `tests/` in all four models, and T_INT as a tiny .COM |
+| `tools/periodcheck.py` | has the 1988 WLIB extract, and WLINK link, every module of a library |
 | `tools/exematch.py` | finds rebuilt code in the archive's own programs (section 17) |
 
 
@@ -865,10 +1010,13 @@ Tools:
 - The exact compiler revision and per-module switches Watcom used; the
   register differences in SIGNAL (medium, large) and SPRINTF (huge).
 - Whether the six lower-case CLIBS modules came from other sources.
-- P_OVERLAY spawn (through the far exec hook) is untested.  The audit's
+- P_OVERLAY spawn (through the far exec hook) is untested.  A
   P_OVERLAY probe returned -1 with errno 9 in all four models, so it did
   not isolate any difference specific to the reconstruction, and the
   success path of P_OVERLAY remains unverified.
+- The record encoding of the original small and compact DOINTR (segment
+  naming and fixup frames): the page span excludes a verbatim rename of
+  the donor's segment (section 7.1).
 - More modules could be moved to the recompile route (FMALLOC, SPAWNVE,
   and the code-pointer modules), which would raise their confidence where
   CLIBM and CLIBL can be reproduced exactly.
@@ -876,8 +1024,7 @@ Tools:
 
 ## 17. Corroboration from the shipped programs
 
-Tool: `tools/exematch.py` (added after the November 2026 audit, which
-found this evidence first).
+Tool: `tools/exematch.py`.
 
 The programs on the distribution disks (`WCL.EXE`, `WMAKE.EXE`,
 `WCPP.EXE` and others) were linked by Watcom with its own libraries,
@@ -888,10 +1035,16 @@ fields (the linker fills them) and searches every .EXE and .COM load image
 in the zip for a single contiguous place where all the other code bytes
 match.
 
-Result: the complete reconstructed code of 55 wholly lost small modules
-and 4 compact ones occurs literally in shipped programs (for example small
-SPAWNVE in WCL.EXE and WMAKE.EXE, small SIGNAL in WCPP.EXE); the counts
-and locations agree with the audit's independent implementation.
+Result: the complete reconstructed code of 56 wholly lost small modules
+and 5 compact ones occurs literally in shipped programs (for example small
+SPAWNVE in WCL.EXE and WMAKE.EXE, small SIGNAL in WCPP.EXE).  An
+independent implementation of the search found the same 55 small and 4
+compact matches without CHAININT; CHAININT's match, in WCC.EXE, WCPP.EXE
+and WCEXP.EXE, appeared once its final RETF was restored (section 7.3).
+CHAININT has no fixups, so its compact match is the same bytes and adds
+no compact-specific evidence, as for the other four compact matches.  For
+SPAWNVE a further check followed the linked far call to its target
+(section 11, decision 3).
 
 This corroborates the instruction bytes of those modules only: not their
 data segments, their record layout and other object-file metadata, or

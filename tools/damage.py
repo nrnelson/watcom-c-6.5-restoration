@@ -6,9 +6,11 @@ Reads every file of the Watcom C 6.5 zip and, for each 512-byte sector of
 each named library (default DISK4/CLIBS.LIB DISK4/CLIBC.LIB), looks for the
 same 512 bytes in every other file of the distribution: first at the same
 offset, then at any offset.  Prints the runs of sectors that are "own" (no
-match elsewhere), "same" (match at the same offset in another file) or
-"moved" (match elsewhere at another offset), and marks those taken to be
-foreign (see foreign()).  Sectors of a single repeated
+match elsewhere), "same" (match at the same offset in another file),
+"moved" (match elsewhere at another offset) or "split" (the end of one
+file at its own offsets, then the next file's bytes at the same offsets,
+split at the first file's length), and marks those taken to be foreign
+(see foreign()).  Sectors of a single repeated
 byte are reported as "fill" since they match too much to say anything.
 
 A match does not by itself prove damage: CLIBS and CLIBC legitimately share
@@ -55,26 +57,40 @@ def classify(name, files, idx):
         elif hits:
             out.append((o, 'moved', sorted(hits)))
         else:
-            out.append((o, 'own', []))
+            cut = split(name, files, o)
+            out.append((o, 'split', cut) if cut else (o, 'own', []))
     return out
+
+
+def split(name, files, o):
+    """(A, len(A), B) when the sector of name at o holds the end of file A
+    at its own offsets (o < len(A) < o + 512) followed by file B's bytes
+    at the same offsets, or None.  The first such A and B by name."""
+    d = files[name]
+    end = o + SECTOR
+    for a in sorted(files):
+        n = len(files[a])
+        if a == name or not o < n < end or d[o:n] != files[a][o:n]:
+            continue
+        for b in sorted(files):
+            if b not in (name, a) and len(files[b]) >= end and \
+                    d[n:end] == files[b][n:end]:
+                return (a, n, b)
+    return None
 
 
 def foreign(cls):
     """Offsets of the sectors taken to be foreign: those matching another
-    file at the same offset, or at a sector-aligned offset elsewhere (a
-    whole sector of another file).  A match at an unaligned offset is a
-    run of bytes shared by two genuine files (CLIBS and CLIBC hold some
-    identical near-code modules) and is not counted."""
+    file at the same offset, split between two other files at the same
+    offsets, or matching at a sector-aligned offset elsewhere (a whole
+    sector of another file).  A match at an unaligned offset is a run of
+    bytes shared by two genuine files (CLIBS and CLIBC hold some identical
+    near-code modules) and is not counted."""
     out = set()
     for o, kind, src in cls:
-        if kind == 'same' or (kind == 'moved' and
-                              any(p % SECTOR == 0 for f, p in src)):
-            out.add(o)
-    # A lone "own" sector between foreign ones is foreign too, from a file
-    # that is not in the distribution (in CLIBS: machine code, a ctype
-    # table with "Unable to open '%s'", README-style text).
-    for o, kind, src in cls:
-        if kind == 'own' and o - SECTOR in out and o + SECTOR in out:
+        if kind in ('same', 'split') or (kind == 'moved' and
+                                         any(p % SECTOR == 0
+                                             for f, p in src)):
             out.add(o)
     return out
 
@@ -92,6 +108,8 @@ def runs(cls):
     for o, kind, src in cls:
         if kind == 'same':
             key = tuple(src)
+        elif kind == 'split':
+            key = src
         elif kind == 'moved':
             key = tuple(sorted({f for f, p in src}))
         else:
@@ -120,6 +138,12 @@ def main(argv):
         print('%s (%d bytes, %d in %d foreign sectors)'
               % (name, len(files[name]), len(bad) * SECTOR, len(bad)))
         for a, b, kind, key, delta in runs(cls):
+            if kind == 'split':
+                f, n, g = key
+                print('  %6d-%6d %-5s %-7s %d-%d %s | %d-%d %s'
+                      % (a, b, kind, 'FOREIGN' if a in bad else '', a, n, f,
+                         n, b, g))
+                continue
             src = ' '.join(key)
             if delta is not None:
                 src += ' (%+d)' % delta
