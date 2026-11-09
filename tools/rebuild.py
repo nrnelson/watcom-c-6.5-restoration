@@ -122,6 +122,11 @@ WITNESS_DIFFERS = {
     # shared exit are long then short; the jump rule gives short then
     # long (METHOD.md 7.3)
     ('CLIBS', 'REALLOC'): 'DISK3/WMAKE.EXE@5448',
+    # the sprintf that INSTALL.EXE and WCPP.EXE link keeps the destination
+    # in SI across the _prtf call; recompile/SPRINTF.c compiled with /os,
+    # the switches that reproduce the intact medium and large SPRINTF,
+    # reloads it from the stack (METHOD.md section 9)
+    ('CLIBS', 'SPRINTF'): 'DISK1/INSTALL.EXE@2b1e',
 }
 
 
@@ -144,8 +149,12 @@ def confidence(row):
         level = 'low'
     else:
         level = 'medium'
-    if notes & {'name-case-from-dictionary', 'near-code-inferred'} and \
-            level == 'high':
+    # a recompile whose near-code lists are edits (SETJMP), whether or not
+    # a shipped program holds the code: a witness confirms instruction
+    # bytes, not the object's records
+    near = any(n == 'near-code-inferred' or
+               n.startswith('near-code-witnessed:') for n in notes)
+    if level == 'high' and ('name-case-from-dictionary' in notes or near):
         level = 'medium'
     if any(n.startswith('witness-differs:') for n in notes):
         level = 'low'
@@ -163,8 +172,9 @@ def recompiled(name, k):
     tools/recompile.py made it (NAME.status: first word exact or accepted,
     and a 'sha256 k <hex>' line matching the object), else None, with a
     warning when an object is there but not vouched for.  The notes are
-    the status file's 'note' lines and, for an accepted source, its accept
-    file's confidence."""
+    the status file's 'note k <word>' lines for this model and its
+    'note <word>' lines (both models) and, for an accepted source, its
+    accept file's confidence."""
     obj = os.path.join(paths.OBJECTS, '%s.%s.OBJ' % (name, k))
     if not os.path.exists(obj):
         return None
@@ -186,8 +196,9 @@ def recompiled(name, k):
         print('warning: %s ignored: its SHA-256 is not the one %s gives' %
               (obj, stat))
         return None
-    notes = [w[1] for w in (line.split() for line in lines[1:])
-             if len(w) == 2 and w[0] == 'note']
+    notes = [w[-1] for w in (line.split() for line in lines[1:])
+             if w and w[0] == 'note' and
+             (len(w) == 2 or (len(w) == 3 and w[1] == k))]
     if level == 'accepted':
         acc = open(os.path.join(ROOT, 'recompile',
                                 name + '.accept')).readline()

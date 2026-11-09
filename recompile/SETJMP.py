@@ -4,22 +4,31 @@ SETJMP is a C module whose two functions, _setjmp and longjmp, are made of
 #pragma aux inline code.  Rather than carry Watcom's instruction bytes in
 this repository, the source is generated from the user's own copy: the
 far-code forms are taken from the CLIBM (near data) and CLIBL (far data)
-modules, and the small-code forms (CLIBS, CLIBC) are derived from them:
+modules, and the small-code forms (CLIBS, CLIBC) are edits of them:
 
   _setjmp:  the far form saves the return address as two words, popping
             the offset to [si+14h] and the segment to [si+12h] and pushing
-            them back; the near form pops and pushes the offset only
-            (pop [si+12h] and push [si+12h] dropped).
+            them back; the near form pops the offset to [si+14h], stores
+            CS in [si+12h] (mov [si+12h],cs where the far form pops) and
+            pushes the offset back (push [si+12h] dropped), so the jmp_buf
+            layout is the same in every model.
   longjmp:  the far form discards the 4-byte return address (add sp,4) and
             pushes segment and offset before its final RETF; the near form
-            discards 2 bytes (add sp,2), pushes the offset only and ends in
-            RET.
+            discards 2 bytes with pop di (DI is reloaded from the buffer
+            afterwards), pushes the offset only and ends in RET.
 
-These small-code forms are an inference: no small- or compact-model SETJMP
-survives to check them against (see METHOD.md), and the exact medium and
-large objects do not test them, since they are not compiled from the same
-instruction list.  NOTE names this for the provenance.  The compiler adds
-RETF or RET after _setjmp itself.
+The exact medium and large objects do not test these edits, since they
+are not compiled from the same instruction list, and no small- or
+compact-model SETJMP survives in the libraries.  The small list is the
+code DISK3/WLIB.EXE, a small-model program, calls: its near call at file
+offset 0xd01 reaches _setjmp at 0x2852 and its tail jump at 0xf4f reaches
+longjmp, and all 84 code bytes there, which hold no fixup fields, equal
+the small object's.  The compact list applies the same edits to the large
+form (which addresses the buffer through DS, so the same instruction
+bytes apply); no shipped program checks it.  NOTE gives the provenance
+note of each: near-code-witnessed:FILE@hex for the small object,
+near-code-inferred for the compact one.  The compiler adds RETF or RET
+after _setjmp itself.
 
 generate(lib) returns the C source; lib(key) gives the omf.Lib of CLIB<key>.
 """
@@ -34,12 +43,15 @@ import omfrec  # noqa: E402
 import x86  # noqa: E402
 
 POP_SEG = b'\x8f\x44\x12'       # pop  word ptr [si+12h]
+MOV_CS_SEG = b'\x8c\x4c\x12'    # mov  [si+12h],cs
 PUSH_SEG = b'\xff\x74\x12'      # push word ptr [si+12h]
 ADD_SP4 = b'\x83\xc4\x04'       # add  sp,4
-ADD_SP2 = b'\x83\xc4\x02'       # add  sp,2
-# the provenance note of the small and compact objects (tools/recompile.py
-# writes it to the status file, tools/rebuild.py grades it medium)
-NOTE = 'near-code-inferred'
+POP_DI = b'\x5f'                 # pop  di
+# the provenance note of the small (S) and compact (C) objects, by model
+# (tools/recompile.py writes it to the status file, tools/rebuild.py
+# grades a near-code- note medium)
+NOTE = {'S': 'near-code-witnessed:DISK3/WLIB.EXE@2852',
+        'C': 'near-code-inferred'}
 
 
 def functions(lib):
@@ -73,10 +85,10 @@ def insns(code):
 
 def near_setjmp(code):
     parts = insns(code)
-    for p in (POP_SEG, PUSH_SEG):
-        if p not in parts:
-            raise SystemExit('SETJMP: return-address handling not found')
-        parts.remove(p)
+    if POP_SEG not in parts or PUSH_SEG not in parts:
+        raise SystemExit('SETJMP: return-address handling not found')
+    parts[parts.index(POP_SEG)] = MOV_CS_SEG
+    parts.remove(PUSH_SEG)
     return b''.join(parts)
 
 
@@ -84,7 +96,7 @@ def near_longjmp(code):
     parts = insns(code)
     if ADD_SP4 not in parts or PUSH_SEG not in parts or parts[-1] != b'\xcb':
         raise SystemExit('SETJMP: return-address handling not found')
-    parts[parts.index(ADD_SP4)] = ADD_SP2
+    parts[parts.index(ADD_SP4)] = POP_DI
     parts.remove(PUSH_SEG)
     parts[-1] = b'\xc3'
     return b''.join(parts)

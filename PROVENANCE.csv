@@ -170,11 +170,11 @@ CLIBS,167,STRCMP,56592,224,0,inferred,convert,medium,,,
 CLIBS,168,STRCHR,56816,224,0,inferred,convert,medium,,,overlapping-insns
 CLIBS,169,STRCAT,57040,224,0,inferred,convert,medium,,,overlapping-insns
 CLIBS,170,SSCANF,57264,272,0,inferred,convert,medium,,,
-CLIBS,171,SPRINTF,57536,304,0,inferred,recompile,high,,convert(fails check),
+CLIBS,171,SPRINTF,57536,304,0,inferred,recompile,low,,convert(fails check),witness-differs:DISK1/INSTALL.EXE@2b1e
 CLIBS,172,SIGNAL,57840,880,0,inferred,recompile,medium,,convert(fails check),recompile-accepted:medium
 CLIBS,173,SETVBUF,58720,288,0,inferred,convert,low,,,code-segment-store
 CLIBS,174,SETLOCAL,59008,400,0,inferred,convert,medium,,,
-CLIBS,175,SETJMP,59408,272,0,inferred,recompile,medium,,convert(fails check),near-code-inferred
+CLIBS,175,SETJMP,59408,272,0,inferred,recompile,medium,,convert(fails check),near-code-witnessed:DISK3/WLIB.EXE@2852
 CLIBS,176,SETBUF,59680,224,0,inferred,convert,medium,,,
 CLIBS,177,SCNF,59904,3024,0,inferred,convert,medium,,,cross-jump stack-check-size
 CLIBS,178,SCANF,62928,272,0,inferred,convert,medium,,,

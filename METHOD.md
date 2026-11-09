@@ -585,12 +585,16 @@ donor's group name, and compares with MATHS, MATHC, MATH87S and MATH87C:
 | MATH87M to MATH87S | 34 | 34 |
 | MATH87L to MATH87C | 34 | 34 |
 
-The differing modules are `_MATHERR`, SINCOS, ATAN2 (both routes) and
-POW (medium to small).  No rule was tuned on these libraries, but they
-are not a sample of the lost CLIB modules either: they are mostly
-floating-point routines with few calls and no code pointers.  The result
-supports the conversion technique; it gives no percentage for the lost
-modules.
+The differing modules are `_MATHERR`, SINCOS, ATAN2 (both routes) and POW
+(medium to small).  Five of these seven (`_MATHERR`, POW and ATAN2 from medium
+to small; `_MATHERR` and SINCOS from large to compact) fill their page span in
+the intact library with fewer than 16 bytes of padding and carry the
+dictionary's names, so the page-fit and name checks of section 10 would have
+accepted them: a measured example of what those checks cannot tell apart.  No
+rule was tuned on these libraries, but they are not a sample of the lost CLIB
+modules either: they are mostly floating-point routines with few calls and no
+code pointers.  The result supports the conversion technique; it gives no
+percentage for the lost modules.
 
 
 ## 9. The recompile route
@@ -618,9 +622,12 @@ pins down everything that depends on the code model, large everything that
 depends on the data model, so small and compact compiled from the same
 source are very likely right.  That reasoning holds for compiled C.
 SETJMP's functions are `#pragma aux` instruction lists written out per
-model, so its medium and large matches verify the far lists and nothing
-about the small-code lists, which are edits of them; the provenance notes
-this (`near-code-inferred`) and grades its two objects medium.  The
+model, so its medium and large matches verify the far lists only, and
+nothing about the small-code lists, which are edits of them.  The small
+list is checked against the code a shipped small-model program, WLIB.EXE,
+calls; the compact list is not checked by anything.  The provenance notes
+this (`near-code-witnessed:DISK3/WLIB.EXE@2852` for small,
+`near-code-inferred` for compact) and grades both objects medium.  The
 sources are reconstructions written for this project, not Watcom's.
 
 Findings that came out of this work:
@@ -634,16 +641,46 @@ Findings that came out of this work:
   sources exist; for a lost module nothing could reveal one.
 - **SPRINTF**: medium and large exact with `/os` only (not `/ox`).  Huge
   differs in one register choice after the huge-pointer helper `__PIA`; no
-  source variant changed it.
+  source variant changed it.  Two shipped small-model programs contradict
+  the small object (79 code bytes).  The `sprintf` in DISK1/INSTALL.EXE
+  at file offset 0x2b1e and in DISK2/WCPP.EXE at 0x68ac is 82 code bytes:
+  it keeps the destination in SI across the `_prtf` call (`push si; mov
+  si,[bp+0Ch]; ... mov ax,si; ... mov bx,si`) where the rebuilt one
+  reloads it from the stack.  `vsprintf` and the output callback are
+  identical, and all four fixup fields resolve in both programs: both
+  calls reach the surviving small PRTF code (at 0x2155 and 0x4b85) and
+  both callback pointers reach the local output routine.  No shipped
+  program holds the 79-byte form.  The same source compiled with `/ot /s`
+  or `/ox /s` gives exactly the 82 witnessed bytes in small (a 303-byte
+  object, which fits the 304-byte span), but those switches break the
+  medium and large matches.  So the switches or the source differed for
+  the small build, and nothing shows which.  The bytes stay, since the
+  `/os` source has evidence of its own (the medium and large matches);
+  the rebuilt small SPRINTF is noted
+  `witness-differs:DISK1/INSTALL.EXE@2b1e` and graded low, as REALLOC is
+  (section 17).  Compact SPRINTF has no witness and is unchanged.
 - **SETJMP**: written as two C functions whose bodies are `#pragma aux`
   inline code, one variant per model (nested `#if`, since 6.5 has no
   `#elif`).  Medium, large and huge exact.  So that this repository holds
   none of Watcom's code, the source is generated at build time by
-  `recompile/SETJMP.py` from the user's own CLIBM and CLIBL modules.  The small-code variants keep
-  one return-address word (offset 14h of the jmp_buf) instead of the two of
-  the far models; this part is inferred and cannot be checked (a variant
-  keeping the offset at 12h instead also matches medium, large and huge,
-  fits both spans and passes T_MISC; 14h is the far form's offset slot).
+  `recompile/SETJMP.py` from the user's own CLIBM and CLIBL modules.
+  The small-code variants are two edits of the far ones.  `_setjmp` pops
+  the return offset to 14h of the jmp_buf as the far form does, then
+  stores CS at 12h (`mov [si+12h],cs`) where the far form pops the return
+  segment, and pushes the offset back alone; so the jmp_buf layout is the
+  same in every model.  `longjmp` discards the near return address with
+  `pop di` (DI is reloaded from the buffer afterwards) where the far form
+  has `add sp,4`, pushes the offset alone and ends in RET.  The small list
+  equals the `_setjmp` and `longjmp` that DISK3/WLIB.EXE, a small-model
+  program, calls: 84 of 84 code bytes at file offset 0x2852, with no fixup
+  fields among them; WLIB's near call at 0xd01 and its tail jump at 0xf4f
+  reach them, both passing the buffer at DS:0F74h.  The compact list
+  applies the same edits to the large form, and no shipped program checks
+  it.  A probe that reads the jmp_buf after `setjmp` sees the caller's CS
+  in slot 9 (offset 12h); the previous form left that slot untouched.  (A
+  variant keeping the offset at 12h instead of 14h also matched medium,
+  large and huge, fitted both spans and passed T_MISC; WLIB settles it at
+  14h.)
 - **SIGNAL**: an INT 23h handler (`interrupt` function), `signal`, `raise`
   with a switch on the signal number.  The library has two public names at
   one address, `raise_` and `__raise`: reproduced by a function `__raise`
@@ -714,14 +751,15 @@ converter strongly but is not an independent prediction.
 
 **Confidence levels** in the provenance: `high` = recompiled with CLIBM and
 CLIBL exact, or the cross route; `medium` = converted with no risky note,
-a near-exact recompile, or a recompile whose small-code instruction lists
-are inferred (`near-code-inferred`: SETJMP, section 9); `low` = converted
-through code-pointer constructs (notes such as `call-far-indirect`,
+a near-exact recompile, or a recompile whose near-code instruction lists
+are edits of the far ones (SETJMP, section 9: `near-code-inferred`, or
+`near-code-witnessed:` when a shipped program holds the code); `low` =
+converted through code-pointer constructs (notes such as `call-far-indirect`,
 `code-segment-ref`), a renamed code segment whose record encoding cannot
 be the original's (`code-segment-renamed`, section 7.1), depending on a
 decision, or contradicted by a shipped program (`witness-differs`,
 section 17).  Low in both libraries: SPAWNVE, EXECADDR, DOINTR, DOEXEC,
-INT86, INT86X, SETVBUF; in CLIBS also REALLOC.
+INT86, INT86X, SETVBUF; in CLIBS also REALLOC and SPRINTF.
 
 
 ## 11. Decisions, with the evidence for each
@@ -756,7 +794,9 @@ INT86, INT86X, SETVBUF; in CLIBS also REALLOC.
    into AX and DX and end in RETF, as inferred for EXECADDR.  This
    supports the decision; it does not verify P_OVERLAY's success path
    (section 16).
-4. **SETJMP's small-code bytes** (section 9) are inferred.
+4. **SETJMP's near-code edits** (section 9) follow the `_setjmp` and
+   `longjmp` that WLIB.EXE calls; the compact form applies the same edits
+   to the large one and is inferred from it.
 5. **The six lower-case CLIBS modules** are rebuilt from CLIBM with the
    dictionary's names; a separate compile may have used other sources,
    which nothing can show.
@@ -922,7 +962,11 @@ tools run.
 ## 14. Confidence
 
 This is my estimate, a judgment and not a measurement: for lost modules
-nothing survives to check against.  It is a weighted count.  The counts
+nothing survives in the original library span to check against.  The
+shipped programs hold the code of 59 small and 6 compact of them (section
+17), but only instruction bytes outside the fixup fields are compared,
+not records, data or relocation targets, and the programs disagree among
+themselves.  It is a weighted count.  The counts
 are from `PROVENANCE.csv`; the weights are my own judgment, with no
 measured basis behind them: originals certain (1); medium-confidence
 rebuilt modules 0.88-0.93 each (from 96.5% exact on survivors, discounted
@@ -934,16 +978,16 @@ low-confidence ones 0.30.
 |---|---|---|---|---|---|
 | original | 1 | 107 | 107 | 102 | 102 |
 | medium | 0.88-0.93 | 133 | 117.0-123.7 | 138 | 121.4-128.3 |
-| high | 0.80 | 2 | 1.6 | 3 | 2.4 |
-| low | 0.30 | 8 | 2.4 | 7 | 2.1 |
-| **modules expected byte-identical** | | 250 | **228.0-234.7 (91-94%)** | 250 | **227.9-234.8 (91-94%)** |
+| high | 0.80 | 1 | 0.8 | 3 | 2.4 |
+| low | 0.30 | 9 | 2.7 | 7 | 2.1 |
+| **modules expected byte-identical** | | 250 | **227.5-234.2 (91-94%)** | 250 | **227.9-234.8 (91-94%)** |
 
 (An earlier version of this table gave 92-94% for CLIBS and 90-93% for CLIBC
 without the arithmetic; the same weights applied to the counts of that time
 give 91.2-93.8% and 90.9-93.6%.  The frame rule of section 7.3 has since moved
 INTDOSX from low to medium in both libraries; SETJMP has moved from high to
-medium in both (section 9) and small REALLOC from medium to low (section
-17).)  For bytes I put the figure at
+medium in both (section 9), small REALLOC from medium to low (section 17) and
+small SPRINTF from high to low (section 9).)  For bytes I put the figure at
 about 98% (CLIBS) and 97-98% (CLIBC), on the view that a wrong module usually
 differs in a few bytes; that too is a judgment.  The chance that either whole
 library is byte-identical is close to zero.
@@ -999,23 +1043,27 @@ first compact library, and the `intr` part of T_INT and T_CHAIN on every
 earlier small and compact library.
 
 Expected results: `out/CLIBS.LIB` SHA-256
-`9f7c970a5f65ccb40550f1d83e5864a0123c2cd36ae6b2446b61cbfd4186e22b`,
+`74d7dcfc7051e312e395bd67a0d1058fe645f960b0b8988494e13913cfbd0e97`,
 `out/CLIBC.LIB` SHA-256
-`1cd2b834f4848fdf635986f28b17f607ef3bdfb96eca97d71ea71b349f980e6b`.
+`a708a545ecd064717e7ccfb4e3b3e613472ae294d4476c86fafe94e353a81627`.
 Earlier outputs: CLIBS
 `95100563d6885e7f0eba7c1a96aa0587bdf2fbe9ef8bfbaf73a367f85216b8c0`,
 before DOINTR's code segment was named `_TEXT` (section 7.1) and
 CHAININT's final RETF was restored (section 7.3), then
 `6cd1fee804d12b2e811709f6f2042354c0b80ea444e97257e377fb9e57bf3a81`,
 before DOSPAWN's undefined word was left undefined (section 7.4) and
-STAT's four-byte exit was shared (section 7.3); CLIBC
+STAT's four-byte exit was shared (section 7.3), then
+`9f7c970a5f65ccb40550f1d83e5864a0123c2cd36ae6b2446b61cbfd4186e22b`,
+before SETJMP's near-code form followed WLIB.EXE (section 9); CLIBC
 `b53e05b77252a952e0896abc3612846bae2a10f4c584d1fa682e752b6e24bcae`,
 before the frame rule of section 7.3 corrected the `int86` and `int86x`
 offsets, then
 `69e6fe1e9b4e0f2b50e047c24c2678fe564c773ead325356376ddce794d9d58b`,
 before the same two changes as the first CLIBS, then
 `9fea459aaaf22ef2feb5284f39c22244ad49312f2330684871566779c06445ae`,
-before the DOSPAWN change.  The last two changes alter no behaviour.
+before the DOSPAWN change, then
+`1cd2b834f4848fdf635986f28b17f607ef3bdfb96eca97d71ea71b349f980e6b`,
+before the SETJMP change.  The last three changes alter no behaviour.
 The whole process is deterministic: the same zip gives the same bytes on
 any machine.
 
@@ -1068,6 +1116,10 @@ Tools:
   (decision 3 is the best available answer, not a proven one).
 - The exact compiler revision and per-module switches Watcom used; the
   register differences in SIGNAL (medium, large) and SPRINTF (huge).
+  `/ox /s` compiled small reproduces the SPRINTF that INSTALL.EXE and
+  WCPP.EXE hold and the SIGNAL that WCPP.EXE holds, and leaves the
+  surviving small PRINTF unchanged, but does not reproduce the intact
+  medium and large SPRINTF, which `/os` does.
 - Whether the six lower-case CLIBS modules came from other sources.
 - P_OVERLAY spawn (through the far exec hook) is untested.  A
   P_OVERLAY probe returned -1 with errno 9 in all four models, so it did
@@ -1094,11 +1146,11 @@ fills them) and any byte no record defines (the linker leaves it), and
 searches every .EXE and .COM load image in the zip for a single contiguous
 place where all the other code bytes match.
 
-Result: for 58 wholly lost small modules and 6 compact ones, every code
+Result: for 59 wholly lost small modules and 6 compact ones, every code
 byte outside the fixup fields is found in a shipped program (for example
-small SPAWNVE in WCL.EXE and WMAKE.EXE, small SIGNAL in WCPP.EXE): 6295
-of the 6781 code bytes of those small modules are compared, 365 of 419
-compact.  Only 15 small and 4 compact modules occur whole, fixup fields
+small SPAWNVE in WCL.EXE and WMAKE.EXE, small SIGNAL in WCPP.EXE): 6379
+of the 6865 code bytes of those small modules are compared, 365 of 419
+compact.  Only 16 small and 4 compact modules occur whole, fixup fields
 included (the tool's `whole` column); a masked call or data operand can
 name another routine or variable while the comparison succeeds.  An
 independent implementation of the search found the same matches without
@@ -1112,6 +1164,15 @@ whatever the linker's buffer held, which is itself evidence that the
 object left them undefined.  For SPAWNVE a further check followed the
 linked far call to its target (section 11, decision 3).
 
+Small SETJMP is the one module whose bytes were written from a shipped
+program.  Its near-code instruction list is an edit of the far one, and
+the project had no other evidence for that edit: the medium and large
+matches do not test it, and no small or compact SETJMP survives.  The list
+was made to equal the `_setjmp` and `longjmp` that WLIB.EXE calls (section
+9), and the tool finds it there whole, all 84 code bytes
+(`DISK3/WLIB.EXE@2852`).  Compact SETJMP passes the buffer in AX:DX, so
+its bytes differ from WLIB's and the tool does not list it.
+
 The shipped programs are witnesses to the builds they were linked from,
 not to the library on the disks, and they disagree among themselves.
 Small GETCTIME matches WMAKE.EXE; the GETCTIME that WTOUCH.EXE's TIME
@@ -1120,13 +1181,25 @@ FF`, and is otherwise identical.  And the REALLOC that WMAKE.EXE's PUTENV
 calls has the same instructions as the rebuilt small REALLOC with the
 other sizes for its two jumps to the shared exit (section 7.3): the
 rebuilt module is noted `witness-differs:DISK3/WMAKE.EXE@5448` in the
-provenance and graded low.  The alternative was not adopted: the rebuild
-takes its bytes from rules and recompiled sources, not from the shipped
-programs, and the two sizes change nothing in what the code does.
+provenance and graded low.  The alternative was not adopted: the jump
+rule was tested on the surviving modules, so the rebuild has evidence of
+its own here (see below), and the two sizes change nothing in what the
+code does.  The `sprintf` that INSTALL.EXE and WCPP.EXE link keeps its
+destination in SI where the rebuilt small SPRINTF reloads it from the
+stack (section 9): that module is noted
+`witness-differs:DISK1/INSTALL.EXE@2b1e` and graded low, and its bytes
+stay, since the source compiled with `/os` reproduces the intact medium
+and large SPRINTF and the switches that give the witnessed bytes do not.
 
 This corroborates the instruction bytes of those modules only: not their
 fixup fields, their data segments, their record layout and other
 object-file metadata, or where their relocations point.  The modules
 therefore stay classified `inferred`, and their confidence is not raised
-(it is lowered where a witness contradicts the result); the tool's output
-is a ledger, not an input to the rebuild.
+(it is lowered where a witness contradicts the result).  The tool's
+output is a ledger, not an input to the rebuild, with one exception:
+where a reconstruction had to choose with no evidence of its own, the
+shipped code decides (SETJMP's near-code list).  Where the reconstruction
+has evidence of its own, a rule tested on the survivors or switches that
+reproduce the intact medium and large objects, a contradicting program
+lowers the grade and is recorded, and the bytes stay (REALLOC and
+SPRINTF).

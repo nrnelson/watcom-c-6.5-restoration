@@ -151,11 +151,11 @@ the ones that were lost.
 | rebuilt and matching every surviving byte of a partly damaged module | 2 | 2 |
 | rebuilt; no bytes survive in the original library span | 141 | 146 |
 
-For some of the rebuilt modules the code survives elsewhere: for 58 small
+For some of the rebuilt modules the code survives elsewhere: for 59 small
 and 6 compact rebuilt modules, every code byte outside the linker's fixup
 fields is found, at one place, in programs shipped on the same disks and
 linked from the original libraries (METHOD.md, section 17).  That checks
-instruction bytes only: not the fixup fields (15 and 4 of those modules
+instruction bytes only: not the fixup fields (16 and 4 of those modules
 occur whole, fields included), the data or the object records; and the 6
 compact matches are the same bytes as 6 of the small ones, so they add
 nothing compact-specific.
@@ -294,9 +294,9 @@ compares the result with the published restoration.  It ends with:
 
 ```
 out/CLIBS.LIB: 250 modules ok
-  SHA-256 9f7c970a5f65ccb40550f1d83e5864a0123c2cd36ae6b2446b61cbfd4186e22b: identical to the published restoration
+  SHA-256 74d7dcfc7051e312e395bd67a0d1058fe645f960b0b8988494e13913cfbd0e97: identical to the published restoration
 out/CLIBC.LIB: 250 modules ok
-  SHA-256 1cd2b834f4848fdf635986f28b17f607ef3bdfb96eca97d71ea71b349f980e6b: identical to the published restoration
+  SHA-256 a708a545ecd064717e7ccfb4e3b3e613472ae294d4476c86fafe94e353a81627: identical to the published restoration
 ```
 
 The process is deterministic: the same archive gives the same bytes on
@@ -327,7 +327,10 @@ tests too), and only into a directory that already holds `CLIBS.LIB` and
 `CLIBC.LIB`.  The libraries found there are first copied to `CLIBS.BAD`
 and `CLIBC.BAD`, unless those files already exist: an existing `.BAD` is
 kept as it is, and is not checked, so after a second install it still
-holds the libraries from before the first.  Both new libraries are written
+holds the libraries from before the first.  A backup the script makes is
+complete or absent: it is written under a temporary name and renamed to
+`.BAD` only when the copy has finished, so a failed install never leaves
+a partial `.BAD`.  Both new libraries are written
 beside the old ones and then moved into place; if moving the second
 fails, the first is put back, so the directory does not end up with one
 new and one old library.  (That covers an error reported during the
@@ -386,6 +389,7 @@ row is what `restore.py` makes now.
 | 2 | (as 1) | `69e6fe1e9b4e0f2b50e047c24c2678fe564c773ead325356376ddce794d9d58b` |
 | 3 | `6cd1fee804d12b2e811709f6f2042354c0b80ea444e97257e377fb9e57bf3a81` | `9fea459aaaf22ef2feb5284f39c22244ad49312f2330684871566779c06445ae` |
 | 4 | `9f7c970a5f65ccb40550f1d83e5864a0123c2cd36ae6b2446b61cbfd4186e22b` | `1cd2b834f4848fdf635986f28b17f607ef3bdfb96eca97d71ea71b349f980e6b` |
+| 5 | `74d7dcfc7051e312e395bd67a0d1058fe645f960b0b8988494e13913cfbd0e97` | `a708a545ecd064717e7ccfb4e3b3e613472ae294d4476c86fafe94e353a81627` |
 
 What changed in the libraries:
 
@@ -404,6 +408,11 @@ What changed in the libraries:
   sequence by a jump, as the shipped INSTALL.EXE and WMAKE.EXE show
   (section 7.3).  Programs linked with the row 3 libraries need no
   relink.
+- 4 to 5, no change in behaviour: SETJMP's near-code form stores the
+  caller's CS in the jmp_buf and discards the return address with `pop
+  di`, as the `_setjmp` and `longjmp` that WLIB.EXE calls do (section 9);
+  the previous form left that slot untouched.  Programs linked with the
+  row 4 libraries need no relink.
 
 If you installed earlier libraries, run the restoration again, reinstall
 them, and relink programs that use `int86` or `int86x` (compact model),
@@ -413,8 +422,13 @@ installs calls `_chain_intr` on its child-process branch).
 
 ## Limits
 
-- For 141 small and 146 compact modules nothing survives to check the
-  reconstruction against.  On surviving modules the methods are about 91%
+- For 141 small and 146 compact modules nothing survives in the original
+  library span to check the reconstruction against.  For 59 small and 6
+  compact of them the code is found in the shipped programs (METHOD.md,
+  section 17), but that checks instruction bytes outside the linker's
+  fixup fields only, not the object records, the data or where the
+  relocations point, and the programs disagree among themselves.  On
+  surviving modules the methods are about 91%
   exact (conversion) and exact in every tested case (recompilation and the
   small/compact cross check); the kinds of module where they are weakest
   are known and marked low in `PROVENANCE.csv`.

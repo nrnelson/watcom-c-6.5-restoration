@@ -28,7 +28,10 @@ Steps:
      installation, which must already hold CLIBS.LIB and CLIBC.LIB.  The
      libraries found there are first copied to CLIBS.BAD and CLIBC.BAD,
      unless those files already exist (an existing .BAD is kept as it is,
-     and is not checked).  Both new libraries are written beside the old
+     and is not checked).  Each backup is written under a temporary name
+     and renamed to .BAD only when the copy is complete, so a backup made
+     by the installer is complete or absent: a failed install never
+     leaves a partial .BAD.  Both new libraries are written beside the old
      ones as .new files, then each is moved into place; if moving the
      second fails, the first is put back as it was just before, so DIR
      does not hold one new and one old library.  (This covers an error
@@ -57,9 +60,9 @@ import recompile  # noqa: E402
 
 EXPECTED = {
     'CLIBS.LIB':
-        '9f7c970a5f65ccb40550f1d83e5864a0123c2cd36ae6b2446b61cbfd4186e22b',
+        '74d7dcfc7051e312e395bd67a0d1058fe645f960b0b8988494e13913cfbd0e97',
     'CLIBC.LIB':
-        '1cd2b834f4848fdf635986f28b17f607ef3bdfb96eca97d71ea71b349f980e6b',
+        'a708a545ecd064717e7ccfb4e3b3e613472ae294d4476c86fafe94e353a81627',
 }
 LIBS = ('CLIBS', 'CLIBC')
 
@@ -110,6 +113,10 @@ def install_libs(target):
                   'directory of a Watcom C 6.5 installation)' % dst[k])
             return 1
     new = {k: dst[k] + '.new' for k in LIBS}
+    # each backup is written to a temporary name and renamed to .BAD only
+    # once complete, so a failed copy never leaves a partial .BAD
+    bad = {k: os.path.join(target, k + '.BAD') for k in LIBS}
+    bad_new = {k: bad[k] + '.new' for k in LIBS}
     prev = {}
     try:
         for k in LIBS:
@@ -117,17 +124,15 @@ def install_libs(target):
         for k in LIBS:
             with open(dst[k], 'rb') as f:
                 prev[k] = f.read()
-            bad = os.path.join(target, k + '.BAD')
-            if os.path.exists(bad):
-                print('  %s exists: kept as it is' % bad)
+            if os.path.exists(bad[k]):
+                print('  %s exists: kept as it is' % bad[k])
             else:
-                shutil.copyfile(dst[k], bad)
-                print('  %s: the library found there' % bad)
+                shutil.copyfile(dst[k], bad_new[k])
+                os.replace(bad_new[k], bad[k])
+                print('  %s: the library found there' % bad[k])
     except OSError as e:
         print('not installed: %s' % e)
-        for k in LIBS:
-            if os.path.exists(new[k]):
-                os.remove(new[k])
+        remove_temporaries(new, bad_new)
         return 1
     done = []
     try:
@@ -149,12 +154,19 @@ def install_libs(target):
                 print('  COULD NOT PUT BACK %s (%s): the library it held is '
                       'in %s if that file exists; DIR now mixes new and old '
                       'libraries' % (dst[j], e2, back))
-        for k in LIBS:
-            if os.path.exists(new[k]):
-                os.remove(new[k])
+        remove_temporaries(new, bad_new)
         print('not installed')
         return 1
     return 0
+
+
+def remove_temporaries(*names):
+    """Remove the temporary files of install_libs that exist ({k: path}
+    dicts); a complete .BAD has already been renamed and is kept."""
+    for d in names:
+        for p in d.values():
+            if os.path.exists(p):
+                os.remove(p)
 
 
 def main(argv):
