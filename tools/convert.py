@@ -29,7 +29,9 @@ code
   RETF -> RET, RETF n -> RET n; a RETF used as a far jump stays
   [bp+d] at or above the return address: d - 2 (near return address)
   relative branches recomputed; JMP near that now fits rel8 -> JMP short
-  LEDATA   C modules: 189-byte chunks; a fixup is never split
+  LEDATA   C modules: 189-byte chunks; a fixup is never split; bytes the
+           source module leaves undefined (DOSPAWN's scratch word) stay
+           undefined: no record covers them
 """
 
 import os
@@ -49,7 +51,10 @@ FIXBODY = 195        # largest FIXUPP body the 6.5 compiler writes
 # returns the far exec hook, is taken as a model-independent far routine)
 KEEP_FAR = set(os.getenv('WCR_KEEP_FAR', '_execaddr_').split())
 CROSS_JUMP = True    # merge exit sequences that small code makes identical
-CJ_MIN = 5           # least bytes a merged tail must have
+# least bytes a merged tail must have: 4 and 5 score the same on the
+# survivors and the math libraries; the shipped INSTALL.EXE and WMAKE.EXE
+# carry small STAT with its four-byte exit shared (METHOD.md 7.3)
+CJ_MIN = 4
 CJ_MAX = 65535       # farthest back (bytes) the compiler looks for a tail
 
 
@@ -73,9 +78,11 @@ def fixup_size(f):
 # ---------------------------------------------------------------- images
 
 def segment_images(recs, seglens):
-    """{seg: bytearray}, [fixup dict + 'seg', 'pos' (absolute)], and
-    the set of segments that hold LIDATA."""
+    """{seg: bytearray}, [fixup dict + 'seg', 'pos' (absolute)], the set
+    of segments that hold LIDATA, and {seg: set of offsets no LEDATA
+    defines} (the image holds zeros there)."""
     img = {s: bytearray(n) for s, n in seglens.items()}
+    holes = {s: set(range(n)) for s, n in seglens.items()}
     fix = []
     lidata = set()
     last = None
@@ -83,6 +90,8 @@ def segment_images(recs, seglens):
         if r['type'] == 0xA0:
             s = r['seg']
             img[s][r['off']:r['off'] + len(r['data'])] = r['data']
+            holes[s].difference_update(range(r['off'],
+                                             r['off'] + len(r['data'])))
             last = r
         elif r['type'] == 0xA2:
             lidata.add(r['seg'])
@@ -99,7 +108,7 @@ def segment_images(recs, seglens):
                 f['seg'] = last['seg']
                 f['pos'] = last['off'] + d['at']
                 fix.append(f)
-    return img, fix, lidata
+    return img, fix, lidata, holes
 
 
 # ---------------------------------------------------------------- code
@@ -978,7 +987,7 @@ def convert(recs, big='CLIBM'):
     is_c = any(r['type'] == 0x88 and r['raw'][:2] == b'\xff\x80'
                for r in recs)
     seglens = {n: s['length'] for n, s in enumerate(segs, 1)}
-    img, fix, lidata = segment_images(recs, seglens)
+    img, fix, lidata, holes = segment_images(recs, seglens)
     pubs = []
     for r in recs:
         if r['type'] == 0x90 and r['seg'] == code_seg:
@@ -1001,6 +1010,7 @@ def convert(recs, big='CLIBM'):
             if not d['T'] and d['targt'] == 0 and d['tdatum'] == code_seg:
                 start = d.get('disp', 0)
     extnames = [n for r in recs if r['type'] == 0x8C for n, ti in r['ext']]
+    newholes = set()
     if code_seg is None:
         newcode, mapoff, relfields = b'', None, []
     else:
@@ -1021,6 +1031,10 @@ def convert(recs, big='CLIBM'):
         newcode, codefix, mapoff, relfields = convert_code(
             code, codefix, code_entries(code, fix, pubs, start), notes,
             frames=is_c, code_target=code_target, ext_name=ext_name)
+        # bytes no record of the source defines stay undefined (the
+        # assembler's DW ? in DOSPAWN's scratch area): the zeros of the
+        # image are not emitted as data
+        newholes = {mapoff(o) for o in holes[code_seg]}
 
     def conv_fix(f):
         g = dict(f)
@@ -1088,7 +1102,7 @@ def convert(recs, big='CLIBM'):
 
     chunk = CHUNK if is_c else ASM_CHUNK
     coderecs = emit_ledata(code_seg, newcode, codefix, chunk,
-                           relfields if is_c else None) \
+                           relfields if is_c else None, newholes) \
         if code_seg else []
 
     def conv_rec(r, prev):
@@ -1296,7 +1310,7 @@ def order_c(recs, conv_rec, is_code, coderecs, codefix, code_seg, mapoff):
     return out
 
 
-def emit_ledata(seg, code, fixups, chunk, relfields=None):
+def emit_ledata(seg, code, fixups, chunk, relfields=None, holes=()):
     """LEDATA (+ FIXUPP) records for a segment image.
 
     With relfields (compiled C), the 6.5 compiler's rule: a chunk holds up
@@ -1304,8 +1318,9 @@ def emit_ledata(seg, code, fixups, chunk, relfields=None):
     189 (a fixup reserves 4 bytes whatever its size), and before the field
     of a forward branch (a label not yet placed) or of a backward rel16
     branch if p + 2 > 189; and before a fixup that would make the chunk's
-    FIXUPP body longer than 195 bytes.  Without (assembler), a fixup is just never
-    split."""
+    FIXUPP body longer than 195 bytes.  Without (assembler), a fixup is
+    just never split.  Offsets in holes are covered by no record: a chunk
+    ends before one and the next starts after it."""
     out = []
     if relfields is not None:
         items = sorted([(f['pos'], 4) for f in fixups] +
@@ -1313,7 +1328,10 @@ def emit_ledata(seg, code, fixups, chunk, relfields=None):
     spans = sorted((f['pos'], f['pos'] + fixup_size(f)) for f in fixups)
     o = 0
     while o < len(code):
-        end = min(o + chunk, len(code))
+        if o in holes:
+            o += 1
+            continue
+        end = min([o + chunk, len(code)] + [h for h in holes if h > o])
         if relfields is not None:
             for p, r in items:
                 if o <= p < end and p + r > o + chunk:

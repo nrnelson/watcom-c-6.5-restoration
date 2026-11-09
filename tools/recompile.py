@@ -30,7 +30,10 @@ Kept objects go to build/objects/NAME.S.OBJ and NAME.C.OBJ, with
 build/objects/NAME.status for tools/rebuild.py: first line exact or
 accepted, then the per-model results, then 'sha256 S <hex>' and
 'sha256 C <hex>' of the kept objects (rebuild.py ignores an object that
-does not match).  Needs build/watcom (tools/install.py).
+does not match), then 'note <word>' when a generator declares a
+provenance note (SETJMP.py: near-code-inferred, its small-code bodies
+being edits the medium and large matches do not test).  Needs
+build/watcom (tools/install.py).
 """
 
 import hashlib
@@ -72,16 +75,18 @@ def first_diff(a, b):
 
 
 def source(name, zpath):
-    """The C source of module name: recompile/NAME.c, or what
-    recompile/NAME.py generates."""
+    """(C source, provenance note) of module name: recompile/NAME.c, or
+    what recompile/NAME.py generates, with the generator's NOTE ('' when
+    it has none)."""
     gen = os.path.join(SRC, name + '.py')
     if os.path.exists(gen):
         spec = importlib.util.spec_from_file_location('gen_' + name, gen)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        return mod.generate(lambda k: paths.library(k, zpath))
+        return (mod.generate(lambda k: paths.library(k, zpath)),
+                getattr(mod, 'NOTE', ''))
     with open(os.path.join(SRC, name + '.c')) as f:
-        return f.read()
+        return f.read(), ''
 
 
 def accept_digests(path):
@@ -108,10 +113,12 @@ def recompile(names, zpath):
     os.makedirs(os.path.join(WORK, 'o'))
     os.makedirs(paths.OBJECTS, exist_ok=True)
     bat = []
+    note = {}
     for name in names:
+        text, note[name] = source(name, zpath)
         with open(os.path.join(WORK, 'c', name + '.C'), 'w',
                   newline='\r\n') as f:
-            f.write(source(name, zpath))
+            f.write(text)
         opt = DEFAULT_OPT
         optf = os.path.join(SRC, name + '.opt')
         if os.path.exists(optf):
@@ -173,6 +180,8 @@ def recompile(names, zpath):
                         '\n')
                 for k in 'SC':
                     f.write('sha256 %s %s\n' % (k, sha256(objs[k])))
+                if note[name]:
+                    f.write('note %s\n' % note[name])
         results[name] = (res, ok, kept)
     return results
 

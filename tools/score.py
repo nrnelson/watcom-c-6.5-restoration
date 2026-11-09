@@ -1,6 +1,6 @@
 """score.py - score the converter on the surviving small-code modules.
 
-usage: python3 -I tools/score.py [ZIP] [ROUTE ...] [-v] [--check]
+usage: python3 -I tools/score.py [ZIP] [ROUTE ...] [-v] [--check | --math]
 
 ROUTE is M>S (medium -> small, default), L>C (large -> compact), or the
 cross-model routes C>S and S>C.  For every module of the target library that
@@ -19,6 +19,12 @@ to the converter: each route must score exactly the population of
 SURVIVORS, none unsupported, and differ on exactly the modules of
 EXPECTED_DIFFER, so every other survivor is exact.  Exit status 1 on any
 deviation; otherwise it prints "score unchanged".
+
+--math scores the converter outside its development set: every module of
+the intact MATHS, MATHC, MATH87S and MATH87C libraries is predicted from
+its MATHM/MATHL (MATH87M/MATH87L) twin, with the donor group name passed,
+and compared byte for byte.  No rule was tuned on these; they test the
+same compiler's output on other code.  Informative only (not frozen).
 """
 
 import os
@@ -182,6 +188,41 @@ def score(zpath, src, dst, verbose, dm=None):
     return rows
 
 
+def score_math(zpath, verbose):
+    """Out-of-sample: the math libraries, intact in all five models."""
+    files = paths.zip_files(zpath)
+
+    def lib(name):
+        return omf.Lib.from_bytes(next(b for n, b in files.items()
+                                       if n.endswith('/%s.LIB' % name)))
+    for family in ('MATH', 'MATH87'):
+        for src, dst in (('M', 'S'), ('L', 'C')):
+            slib = lib(family + src)
+            donors = {omf.theadr(slib.module(s)): s for s in slib.starts}
+            tlib = lib(family + dst)
+            exact = []
+            differ = []
+            for ts in tlib.starts:
+                name = omf.theadr(tlib.module(ts))
+                try:
+                    got, notes = convert.convert(
+                        omfrec.decode_module(slib.module(donors[name])),
+                        family + src)
+                    same = omfrec.module_bytes(got) == module_bytes(tlib, ts)
+                except convert.Unsupported as e:
+                    same, notes = False, [str(e)]
+                (exact if same else differ).append((name, notes))
+            print('%s %s>%s: %d modules: exact %d, differ %d%s' % (
+                family, src, dst, len(exact) + len(differ), len(exact),
+                len(differ),
+                ' (%s)' % ', '.join(n for n, w in differ) if differ else ''))
+            if verbose:
+                for name, notes in exact + differ:
+                    print('  %-10s %-7s %s' % (
+                        name, 'exact' if (name, notes) in exact else 'differ',
+                        ' '.join(notes)))
+
+
 def main(argv):
     args = argv[1:]
     zpath = args.pop(0) if args and args[0].lower().endswith('.zip') \
@@ -189,6 +230,9 @@ def main(argv):
     zpath = paths.check_zip(zpath)
     verbose = '-v' in args
     check = '--check' in args
+    if '--math' in args:
+        score_math(zpath, verbose)
+        return 0
     routes = [a for a in args if '>' in a] or ['M>S']
     dm = damage.damage_map(zpath, [DISKS['S'], DISKS['C']])
     bad = []

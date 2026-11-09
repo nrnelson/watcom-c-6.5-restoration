@@ -4,7 +4,8 @@ usage: python3 -I tools/periodcheck.py [LIB ...]
 
 LIB is a library file named CLIB<k>.LIB, k one of S, C, M, L, H (its
 memory model), or the single letter M, L or H for that intact library
-read from the zip.  Default: out/CLIBS.LIB and out/CLIBC.LIB.
+read from the zip (the only use of the zip here; a file is checked
+without it).  Default: out/CLIBS.LIB and out/CLIBC.LIB.
 
 Two checks per library, each run by Watcom C 6.5's own tools in headless
 DOSBox-X (tools/dosrun.py):
@@ -269,6 +270,7 @@ def target(arg):
     """(label, model letter, library bytes)."""
     if arg.upper() in ('M', 'L', 'H'):
         k = arg.upper()
+        paths.check_zip()       # only these targets read the zip
         return 'zip CLIB%s.LIB' % k, k, paths.library_bytes(k)
     base = os.path.basename(arg).upper()
     if not re.match(r'CLIB[%s]\.LIB$' % MODELS, base):
@@ -293,7 +295,6 @@ def main(argv):
     if any(a.startswith('-') for a in args):
         sys.stderr.write(__doc__.split('\n\n')[1] + '\n')
         return 2
-    paths.check_zip()
     if os.path.isdir(WORK):
         shutil.rmtree(WORK)
     jobs = []

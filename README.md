@@ -151,10 +151,14 @@ the ones that were lost.
 | rebuilt and matching every surviving byte of a partly damaged module | 2 | 2 |
 | rebuilt; no bytes survive in the original library span | 141 | 146 |
 
-For some of the rebuilt modules the code survives elsewhere: 56 small and
-5 compact code segments are found byte for byte in programs shipped on the
-same disks, linked from the original libraries (METHOD.md, section 17).
-That checks instruction bytes only, not the object records.
+For some of the rebuilt modules the code survives elsewhere: for 58 small
+and 6 compact rebuilt modules, every code byte outside the linker's fixup
+fields is found, at one place, in programs shipped on the same disks and
+linked from the original libraries (METHOD.md, section 17).  That checks
+instruction bytes only: not the fixup fields (15 and 4 of those modules
+occur whole, fields included), the data or the object records; and the 6
+compact matches are the same bytes as 6 of the small ones, so they add
+nothing compact-specific.
 
 - **Measured on the survivors**: the converter reproduces 97 of 106 small
   and 93 of 102 compact modules byte for byte, every record; the cross
@@ -164,6 +168,10 @@ That checks instruction bytes only, not the object records.
   one module it was tested on (PRINTF) in all five libraries, including
   the surviving small and compact ones.  These rules were developed on
   those same modules, so the scores are optimistic for the lost ones.
+  Outside that development set, the converter reproduces 38 of 42 modules
+  of the intact MATHS library from MATHM, 39 of 42 of MATHC from MATHL,
+  and all 34 of MATH87S and MATH87C from their twins (METHOD.md, section
+  8).
 - **Preserved**: 106 small modules (and TELL, after a one-bit repair) and
   102 compact modules are kept byte for byte, and every surviving byte of
   the four partly damaged modules is matched.
@@ -286,9 +294,9 @@ compares the result with the published restoration.  It ends with:
 
 ```
 out/CLIBS.LIB: 250 modules ok
-  SHA-256 6cd1fee804d12b2e811709f6f2042354c0b80ea444e97257e377fb9e57bf3a81: identical to the published restoration
+  SHA-256 9f7c970a5f65ccb40550f1d83e5864a0123c2cd36ae6b2446b61cbfd4186e22b: identical to the published restoration
 out/CLIBC.LIB: 250 modules ok
-  SHA-256 9fea459aaaf22ef2feb5284f39c22244ad49312f2330684871566779c06445ae: identical to the published restoration
+  SHA-256 1cd2b834f4848fdf635986f28b17f607ef3bdfb96eca97d71ea71b349f980e6b: identical to the published restoration
 ```
 
 The process is deterministic: the same archive gives the same bytes on
@@ -377,6 +385,7 @@ row is what `restore.py` makes now.
 | 1 | `95100563d6885e7f0eba7c1a96aa0587bdf2fbe9ef8bfbaf73a367f85216b8c0` | `b53e05b77252a952e0896abc3612846bae2a10f4c584d1fa682e752b6e24bcae` |
 | 2 | (as 1) | `69e6fe1e9b4e0f2b50e047c24c2678fe564c773ead325356376ddce794d9d58b` |
 | 3 | `6cd1fee804d12b2e811709f6f2042354c0b80ea444e97257e377fb9e57bf3a81` | `9fea459aaaf22ef2feb5284f39c22244ad49312f2330684871566779c06445ae` |
+| 4 | `9f7c970a5f65ccb40550f1d83e5864a0123c2cd36ae6b2446b61cbfd4186e22b` | `1cd2b834f4848fdf635986f28b17f607ef3bdfb96eca97d71ea71b349f980e6b` |
 
 What changed in the libraries:
 
@@ -389,6 +398,12 @@ What changed in the libraries:
   segment, and CHAININT ends in its RETF again (section 7.3), so
   `_chain_intr()` jumps far to the previous handler instead of returning
   near.
+- 3 to 4, no change in behaviour: DOSPAWN's object leaves its two
+  undefined scratch bytes undefined, as the assembler did, instead of
+  writing zeros (section 7.4); and small STAT shares a four-byte exit
+  sequence by a jump, as the shipped INSTALL.EXE and WMAKE.EXE show
+  (section 7.3).  Programs linked with the row 3 libraries need no
+  relink.
 
 If you installed earlier libraries, run the restoration again, reinstall
 them, and relink programs that use `int86` or `int86x` (compact model),

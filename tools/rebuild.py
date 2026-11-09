@@ -114,6 +114,16 @@ RISKY = {'call-far-indirect', 'jmp-far-indirect', 'far-code-pointer',
 MODEL_INDEPENDENT = set(os.getenv('WCR_MODEL_INDEPENDENT',
                                   'EXECADDR').split())
 
+# Rebuilt modules a shipped program contradicts (METHOD.md section 17):
+# the routine the program's linked code calls has the same instructions
+# but not the same bytes.  Noted 'witness-differs:FILE@hex', graded low.
+WITNESS_DIFFERS = {
+    # WMAKE's PUTENV (matched) calls a REALLOC whose two jumps to the
+    # shared exit are long then short; the jump rule gives short then
+    # long (METHOD.md 7.3)
+    ('CLIBS', 'REALLOC'): 'DISK3/WMAKE.EXE@5448',
+}
+
 
 def confidence(row):
     """high / medium / low for a rebuilt module, from its route and notes
@@ -134,8 +144,11 @@ def confidence(row):
         level = 'low'
     else:
         level = 'medium'
-    if 'name-case-from-dictionary' in notes and level == 'high':
+    if notes & {'name-case-from-dictionary', 'near-code-inferred'} and \
+            level == 'high':
         level = 'medium'
+    if any(n.startswith('witness-differs:') for n in notes):
+        level = 'low'
     return level
 
 
@@ -146,10 +159,12 @@ def end_of_modules(lib):
 
 
 def recompiled(name, k):
-    """(object bytes, note) of build/objects/NAME.k.OBJ when
+    """(object bytes, notes) of build/objects/NAME.k.OBJ when
     tools/recompile.py made it (NAME.status: first word exact or accepted,
     and a 'sha256 k <hex>' line matching the object), else None, with a
-    warning when an object is there but not vouched for."""
+    warning when an object is there but not vouched for.  The notes are
+    the status file's 'note' lines and, for an accepted source, its accept
+    file's confidence."""
     obj = os.path.join(paths.OBJECTS, '%s.%s.OBJ' % (name, k))
     if not os.path.exists(obj):
         return None
@@ -171,12 +186,13 @@ def recompiled(name, k):
         print('warning: %s ignored: its SHA-256 is not the one %s gives' %
               (obj, stat))
         return None
-    note = ''
+    notes = [w[1] for w in (line.split() for line in lines[1:])
+             if len(w) == 2 and w[0] == 'note']
     if level == 'accepted':
         acc = open(os.path.join(ROOT, 'recompile',
                                 name + '.accept')).readline()
-        note = 'recompile-accepted:%s' % acc.split()[0]
-    return data, note
+        notes.append('recompile-accepted:%s' % acc.split()[0])
+    return data, ' '.join(notes)
 
 
 def module_raw(lib, start):
@@ -337,6 +353,9 @@ def main(argv):
                         # the bytes come from the other library's repaired
                         # module
                         notes = (notes + ' cross-from-repaired').strip()
+                witness = WITNESS_DIFFERS.get((row['lib'], dname))
+                if witness:
+                    notes = (notes + ' witness-differs:' + witness).strip()
                 # repaired bytes of this library inside the span
                 repaired = repair_note(k, start, end)
                 row['notes'] = '; '.join(x for x in (notes, repaired) if x)

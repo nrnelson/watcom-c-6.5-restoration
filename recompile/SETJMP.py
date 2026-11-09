@@ -16,8 +16,10 @@ modules, and the small-code forms (CLIBS, CLIBC) are derived from them:
             RET.
 
 These small-code forms are an inference: no small- or compact-model SETJMP
-survives to check them against (see METHOD.md).  The compiler adds RETF or
-RET after _setjmp itself.
+survives to check them against (see METHOD.md), and the exact medium and
+large objects do not test them, since they are not compiled from the same
+instruction list.  NOTE names this for the provenance.  The compiler adds
+RETF or RET after _setjmp itself.
 
 generate(lib) returns the C source; lib(key) gives the omf.Lib of CLIB<key>.
 """
@@ -35,6 +37,9 @@ POP_SEG = b'\x8f\x44\x12'       # pop  word ptr [si+12h]
 PUSH_SEG = b'\xff\x74\x12'      # push word ptr [si+12h]
 ADD_SP4 = b'\x83\xc4\x04'       # add  sp,4
 ADD_SP2 = b'\x83\xc4\x02'       # add  sp,2
+# the provenance note of the small and compact objects (tools/recompile.py
+# writes it to the status file, tools/rebuild.py grades it medium)
+NOTE = 'near-code-inferred'
 
 
 def functions(lib):

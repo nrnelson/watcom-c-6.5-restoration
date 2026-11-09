@@ -39,7 +39,7 @@ CLIBS,36,TZSET,13296,512,512,original,,original,,,
 CLIBS,37,TELL,13808,240,240,original-repaired,,original,,,byte 14012 4C->6C: TELL PUBDEF: checksum fails with 4C; the dictionary names the public tell_; 6C fixes both
 CLIBS,38,SYSTEM,14048,352,288,anchored,convert,medium,,,
 CLIBS,39,STKSIZE,14400,176,0,inferred,convert,medium,,,
-CLIBS,40,STAT,14576,800,0,inferred,convert,medium,,,overlapping-insns
+CLIBS,40,STAT,14576,800,0,inferred,convert,medium,,,cross-jump overlapping-insns
 CLIBS,41,SPLITPAT,15376,384,0,inferred,convert,medium,,,
 CLIBS,42,SPAWNVPE,15760,480,0,inferred,convert,medium,,,overlapping-insns
 CLIBS,43,SPAWNVP,16240,224,0,inferred,convert,medium,,,
@@ -58,7 +58,7 @@ CLIBS,55,ROTR,20320,176,0,inferred,convert,medium,,,
 CLIBS,56,ROTL,20496,176,0,inferred,convert,medium,,,
 CLIBS,57,RMDIR,20672,224,0,inferred,convert,medium,,,
 CLIBS,58,RENAME,20896,240,0,inferred,convert,medium,,,
-CLIBS,59,REALLOC,21136,400,0,inferred,convert,medium,,,
+CLIBS,59,REALLOC,21136,400,0,inferred,convert,low,,,witness-differs:DISK3/WMAKE.EXE@5448
 CLIBS,60,READ,21536,416,0,inferred,convert,medium,,,
 CLIBS,61,QREAD,21952,288,0,inferred,convert,medium,,,
 CLIBS,62,PUTENV,22240,672,0,inferred,convert,medium,,,
@@ -174,7 +174,7 @@ CLIBS,171,SPRINTF,57536,304,0,inferred,recompile,high,,convert(fails check),
 CLIBS,172,SIGNAL,57840,880,0,inferred,recompile,medium,,convert(fails check),recompile-accepted:medium
 CLIBS,173,SETVBUF,58720,288,0,inferred,convert,low,,,code-segment-store
 CLIBS,174,SETLOCAL,59008,400,0,inferred,convert,medium,,,
-CLIBS,175,SETJMP,59408,272,0,inferred,recompile,high,,convert(fails check),
+CLIBS,175,SETJMP,59408,272,0,inferred,recompile,medium,,convert(fails check),near-code-inferred
 CLIBS,176,SETBUF,59680,224,0,inferred,convert,medium,,,
 CLIBS,177,SCNF,59904,3024,0,inferred,convert,medium,,,cross-jump stack-check-size
 CLIBS,178,SCANF,62928,272,0,inferred,convert,medium,,,
@@ -424,7 +424,7 @@ CLIBC,171,SPRINTF,60592,352,0,inferred,recompile,high,,convert(fails check),
 CLIBC,172,SIGNAL,60944,896,0,inferred,recompile,medium,,convert(fails check),recompile-accepted:medium
 CLIBC,173,SETVBUF,61840,304,0,inferred,convert,low,,,code-segment-store
 CLIBC,174,SETLOCAL,62144,480,0,inferred,convert,medium,,,
-CLIBC,175,SETJMP,62624,288,0,inferred,recompile,high,,convert(other bytes),
+CLIBC,175,SETJMP,62624,288,0,inferred,recompile,medium,,convert(other bytes),near-code-inferred
 CLIBC,176,SETBUF,62912,240,0,inferred,convert,medium,,,
 CLIBC,177,SCNF,63152,3424,3088,anchored,convert,medium,,,cross-jump stack-check-size
 CLIBC,178,SCANF,66576,304,304,original,,original,,,

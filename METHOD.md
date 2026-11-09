@@ -449,7 +449,19 @@ Each with the evidence that established it:
   (or an inverted `jcc`+`jmp near` pair) that medium needed long for
   distance is made short where it now fits, in one pass in address order.
   An iterated version scores the same on the survivors; the one-pass form
-  was kept because it fitted the jump study better.
+  was kept because it fitted the jump study better.  The rule is known to
+  be wrong in two places.  Compact FWRITE (section 8) keeps a jump long
+  that the compiler shortened.  And the REALLOC in the shipped
+  `WMAKE.EXE`, reached by following the near call in its PUTENV (which
+  matches the rebuilt small PUTENV byte for byte), has its two jumps to
+  the shared exit long then short (`E9 77 00` at 11h, `EB 6C` at 1Dh)
+  where the rule gives short then long; medium has both long.  Small
+  REALLOC is therefore graded low (section 17).  No simple alternative
+  fits better: in the five libraries the compiler left 26 forward jumps
+  long that fit in a byte, at distances from 99 to 122, and made others
+  short at 120 to 122; neither another pass order nor counting the
+  not-yet-sized later branches at their long size separates the two
+  groups.
 - **Cross-jumping**: 6.5 replaces a function's exit sequence by a jump to an
   identical exit emitted earlier.  In medium a far function's exit ends in
   RETF and a near static function's in RET, so they cannot be shared; in
@@ -460,8 +472,12 @@ Each with the evidence that established it:
   bytes wins, the earliest of equals; existing merges are re-aimed at an
   earlier identical exit when one now exists; chains (an exit ending in a
   jump to another exit) count as the instructions they jump to.  The
-  5-byte threshold was measured: 3 breaks two surviving modules, 4 and 5
-  are equal, 6 loses one.
+  threshold was measured: 3 breaks two surviving modules, 4 and 5 are
+  equal on the survivors and on the math libraries (section 8), 6 loses
+  one.  The shipped `INSTALL.EXE` and `WMAKE.EXE` both hold small STAT
+  with its four-byte exit (`pop si; pop cx; pop bx; ret`) shared by a
+  jump (section 17), so the threshold is 4; on this corpus that changes
+  small STAT and nothing else.
 - **Relocation**: every branch displacement, fixup position, public offset,
   jump-table entry and the module start address is moved to the new code.
 
@@ -498,7 +514,13 @@ Record order:
   as in the source module.
 
 Assembler modules (no source-name COMENT) keep the source module's record
-order, with LEDATA up to 1020 bytes.
+order, with LEDATA up to 1020 bytes.  Bytes that no record of the source
+module defines stay undefined: DOSPAWN's assembler source left one word
+of its scratch area (code offsets 6-7) as `DW ?`, so its LEDATA stops at
+6 and resumes at 8, in every intact library; the rebuilt small and
+compact DOSPAWN do the same.  The linker leaves such bytes as they were,
+and the two shipped programs holding small DOSPAWN have different words
+there (section 17).
 
 ### 7.5 Notes
 
@@ -550,6 +572,26 @@ freezes the scores as a regression test: it fails unless both routes score
 exactly these populations, with no module unsupported and exactly the
 differing modules listed above.
 
+**Outside the development set.**  The math libraries are intact in all
+five models, so their small and compact modules are answers the converter
+never saw.  `python3 -I tools/score.py --math` converts every module of
+MATHM to small and MATHL to compact (and MATH87M, MATH87L), passing the
+donor's group name, and compares with MATHS, MATHC, MATH87S and MATH87C:
+
+| route | targets | exact |
+|---|---|---|
+| MATHM to MATHS | 42 | 38 |
+| MATHL to MATHC | 42 | 39 |
+| MATH87M to MATH87S | 34 | 34 |
+| MATH87L to MATH87C | 34 | 34 |
+
+The differing modules are `_MATHERR`, SINCOS, ATAN2 (both routes) and
+POW (medium to small).  No rule was tuned on these libraries, but they
+are not a sample of the lost CLIB modules either: they are mostly
+floating-point routines with few calls and no code pointers.  The result
+supports the conversion technique; it gives no percentage for the lost
+modules.
+
 
 ## 9. The recompile route
 
@@ -574,8 +616,12 @@ itself in all five models (with the source placed so it is named
 and large objects are byte-identical to CLIBM's and CLIBL's modules: medium
 pins down everything that depends on the code model, large everything that
 depends on the data model, so small and compact compiled from the same
-source are very likely right.  The sources are reconstructions written for
-this project, not Watcom's.
+source are very likely right.  That reasoning holds for compiled C.
+SETJMP's functions are `#pragma aux` instruction lists written out per
+model, so its medium and large matches verify the far lists and nothing
+about the small-code lists, which are edits of them; the provenance notes
+this (`near-code-inferred`) and grades its two objects medium.  The
+sources are reconstructions written for this project, not Watcom's.
 
 Findings that came out of this work:
 
@@ -595,7 +641,9 @@ Findings that came out of this work:
   none of Watcom's code, the source is generated at build time by
   `recompile/SETJMP.py` from the user's own CLIBM and CLIBL modules.  The small-code variants keep
   one return-address word (offset 14h of the jmp_buf) instead of the two of
-  the far models; this part is inferred and cannot be checked.
+  the far models; this part is inferred and cannot be checked (a variant
+  keeping the offset at 12h instead also matches medium, large and huge,
+  fits both spans and passes T_MISC; 14h is the far form's offset slot).
 - **SIGNAL**: an INT 23h handler (`interrupt` function), `signal`, `raise`
   with a switch on the signal number.  The library has two public names at
   one address, `raise_` and `__raise`: reproduced by a function `__raise`
@@ -666,11 +714,14 @@ converter strongly but is not an independent prediction.
 
 **Confidence levels** in the provenance: `high` = recompiled with CLIBM and
 CLIBL exact, or the cross route; `medium` = converted with no risky note,
-or a near-exact recompile; `low` = converted through code-pointer
-constructs (notes such as `call-far-indirect`, `code-segment-ref`), a
-renamed code segment whose record encoding cannot be the original's
-(`code-segment-renamed`, section 7.1), or depending on a decision.  Low in
-both libraries: SPAWNVE, EXECADDR, DOINTR, DOEXEC, INT86, INT86X, SETVBUF.
+a near-exact recompile, or a recompile whose small-code instruction lists
+are inferred (`near-code-inferred`: SETJMP, section 9); `low` = converted
+through code-pointer constructs (notes such as `call-far-indirect`,
+`code-segment-ref`), a renamed code segment whose record encoding cannot
+be the original's (`code-segment-renamed`, section 7.1), depending on a
+decision, or contradicted by a shipped program (`witness-differs`,
+section 17).  Low in both libraries: SPAWNVE, EXECADDR, DOINTR, DOEXEC,
+INT86, INT86X, SETVBUF; in CLIBS also REALLOC.
 
 
 ## 11. Decisions, with the evidence for each
@@ -882,15 +933,17 @@ low-confidence ones 0.30.
 | group | weight | CLIBS count | CLIBS expected | CLIBC count | CLIBC expected |
 |---|---|---|---|---|---|
 | original | 1 | 107 | 107 | 102 | 102 |
-| medium | 0.88-0.93 | 133 | 117.0-123.7 | 137 | 120.6-127.4 |
-| high | 0.80 | 3 | 2.4 | 4 | 3.2 |
-| low | 0.30 | 7 | 2.1 | 7 | 2.1 |
-| **modules expected byte-identical** | | 250 | **228.5-235.2 (91-94%)** | 250 | **227.9-234.7 (91-94%)** |
+| medium | 0.88-0.93 | 133 | 117.0-123.7 | 138 | 121.4-128.3 |
+| high | 0.80 | 2 | 1.6 | 3 | 2.4 |
+| low | 0.30 | 8 | 2.4 | 7 | 2.1 |
+| **modules expected byte-identical** | | 250 | **228.0-234.7 (91-94%)** | 250 | **227.9-234.8 (91-94%)** |
 
 (An earlier version of this table gave 92-94% for CLIBS and 90-93% for CLIBC
 without the arithmetic; the same weights applied to the counts of that time
 give 91.2-93.8% and 90.9-93.6%.  The frame rule of section 7.3 has since moved
-INTDOSX from low to medium in both libraries.)  For bytes I put the figure at
+INTDOSX from low to medium in both libraries; SETJMP has moved from high to
+medium in both (section 9) and small REALLOC from medium to low (section
+17).)  For bytes I put the figure at
 about 98% (CLIBS) and 97-98% (CLIBC), on the view that a wrong module usually
 differs in a few bytes; that too is a judgment.  The chance that either whole
 library is byte-identical is close to zero.
@@ -921,6 +974,7 @@ python3 -I tools/install.py                 # Watcom C 6.5 into build/watcom
 python3 -I tools/damage.py                  # section 4
 python3 -I tools/survey.py -v               # section 5
 python3 -I tools/score.py 'M>S' 'L>C' 'C>S' 'S>C' -v   # section 8
+python3 -I tools/score.py --math            # section 8, the math libraries
 python3 -I tools/recompile.py PRINTF SPRINTF SETJMP SIGNAL  # section 9
 python3 -I tools/rebuild.py -v              # section 10
 python3 -I tools/checklib.py out/CLIBS.LIB out/CLIBC.LIB
@@ -945,18 +999,23 @@ first compact library, and the `intr` part of T_INT and T_CHAIN on every
 earlier small and compact library.
 
 Expected results: `out/CLIBS.LIB` SHA-256
-`6cd1fee804d12b2e811709f6f2042354c0b80ea444e97257e377fb9e57bf3a81`,
+`9f7c970a5f65ccb40550f1d83e5864a0123c2cd36ae6b2446b61cbfd4186e22b`,
 `out/CLIBC.LIB` SHA-256
-`9fea459aaaf22ef2feb5284f39c22244ad49312f2330684871566779c06445ae`.
+`1cd2b834f4848fdf635986f28b17f607ef3bdfb96eca97d71ea71b349f980e6b`.
 Earlier outputs: CLIBS
 `95100563d6885e7f0eba7c1a96aa0587bdf2fbe9ef8bfbaf73a367f85216b8c0`,
 before DOINTR's code segment was named `_TEXT` (section 7.1) and
-CHAININT's final RETF was restored (section 7.3); CLIBC
+CHAININT's final RETF was restored (section 7.3), then
+`6cd1fee804d12b2e811709f6f2042354c0b80ea444e97257e377fb9e57bf3a81`,
+before DOSPAWN's undefined word was left undefined (section 7.4) and
+STAT's four-byte exit was shared (section 7.3); CLIBC
 `b53e05b77252a952e0896abc3612846bae2a10f4c584d1fa682e752b6e24bcae`,
 before the frame rule of section 7.3 corrected the `int86` and `int86x`
 offsets, then
 `69e6fe1e9b4e0f2b50e047c24c2678fe564c773ead325356376ddce794d9d58b`,
-before the same two changes as CLIBS.
+before the same two changes as the first CLIBS, then
+`9fea459aaaf22ef2feb5284f39c22244ad49312f2330684871566779c06445ae`,
+before the DOSPAWN change.  The last two changes alter no behaviour.
 The whole process is deterministic: the same zip gives the same bytes on
 any machine.
 
@@ -992,7 +1051,7 @@ Tools:
 | `tools/survey.py` | which modules survive |
 | `tools/x86.py` | 8086/80186 instruction decoder |
 | `tools/convert.py` | the medium-to-small / large-to-compact converter |
-| `tools/score.py` | scores the converter and the cross route on survivors |
+| `tools/score.py` | scores the converter and the cross route on survivors, and the converter on the math libraries |
 | `tools/moddiff.py` | compares one module across two libraries |
 | `tools/recompile.py` | compiles `recompile/NAME.c` in all models and compares |
 | `tools/rebuild.py` | builds `out/CLIBS.LIB`, `out/CLIBC.LIB`, `out/PROVENANCE.csv` |
@@ -1029,25 +1088,45 @@ Tool: `tools/exematch.py`.
 The programs on the distribution disks (`WCL.EXE`, `WMAKE.EXE`,
 `WCPP.EXE` and others) were linked by Watcom with its own libraries,
 mostly the small-model one, so lost library code may survive inside them.
-For every `inferred` module whose code is one fully populated CODE segment
-with at least 20 bytes outside fixup fields, the tool masks the fixup
-fields (the linker fills them) and searches every .EXE and .COM load image
-in the zip for a single contiguous place where all the other code bytes
-match.
+For every `inferred` module whose code is one CODE segment with at least
+20 bytes outside fixup fields, the tool masks the fixup fields (the linker
+fills them) and any byte no record defines (the linker leaves it), and
+searches every .EXE and .COM load image in the zip for a single contiguous
+place where all the other code bytes match.
 
-Result: the complete reconstructed code of 56 wholly lost small modules
-and 5 compact ones occurs literally in shipped programs (for example small
-SPAWNVE in WCL.EXE and WMAKE.EXE, small SIGNAL in WCPP.EXE).  An
-independent implementation of the search found the same 55 small and 4
-compact matches without CHAININT; CHAININT's match, in WCC.EXE, WCPP.EXE
-and WCEXP.EXE, appeared once its final RETF was restored (section 7.3).
-CHAININT has no fixups, so its compact match is the same bytes and adds
-no compact-specific evidence, as for the other four compact matches.  For
-SPAWNVE a further check followed the linked far call to its target
-(section 11, decision 3).
+Result: for 58 wholly lost small modules and 6 compact ones, every code
+byte outside the fixup fields is found in a shipped program (for example
+small SPAWNVE in WCL.EXE and WMAKE.EXE, small SIGNAL in WCPP.EXE): 6295
+of the 6781 code bytes of those small modules are compared, 365 of 419
+compact.  Only 15 small and 4 compact modules occur whole, fixup fields
+included (the tool's `whole` column); a masked call or data operand can
+name another routine or variable while the comparison succeeds.  An
+independent implementation of the search found the same matches without
+CHAININT; CHAININT's match, in WCC.EXE, WCPP.EXE and WCEXP.EXE, appeared
+once its final RETF was restored (section 7.3).  The 6 compact matches
+(MOVEDATA, LSEEK, ISATTY, DOSPAWN, CHAININT, TIMEUTIL) are at the same
+places as the small ones: the same bytes, no compact-specific evidence.
+DOSPAWN's match covers 188 of its 240 code bytes; the two bytes no record
+defines (section 7.4) hold `46 70` in WCL.EXE and `20 6D` in WMAKE.EXE,
+whatever the linker's buffer held, which is itself evidence that the
+object left them undefined.  For SPAWNVE a further check followed the
+linked far call to its target (section 11, decision 3).
+
+The shipped programs are witnesses to the builds they were linked from,
+not to the library on the disks, and they disagree among themselves.
+Small GETCTIME matches WMAKE.EXE; the GETCTIME that WTOUCH.EXE's TIME
+calls (the TIME itself matches) lacks one five-byte store, `C7 47 10 FF
+FF`, and is otherwise identical.  And the REALLOC that WMAKE.EXE's PUTENV
+calls has the same instructions as the rebuilt small REALLOC with the
+other sizes for its two jumps to the shared exit (section 7.3): the
+rebuilt module is noted `witness-differs:DISK3/WMAKE.EXE@5448` in the
+provenance and graded low.  The alternative was not adopted: the rebuild
+takes its bytes from rules and recompiled sources, not from the shipped
+programs, and the two sizes change nothing in what the code does.
 
 This corroborates the instruction bytes of those modules only: not their
-data segments, their record layout and other object-file metadata, or
-where their relocations point.  The modules therefore stay classified
-`inferred`, and their confidence is not raised; the tool's output is a
-ledger, not an input to the rebuild.
+fixup fields, their data segments, their record layout and other
+object-file metadata, or where their relocations point.  The modules
+therefore stay classified `inferred`, and their confidence is not raised
+(it is lowered where a witness contradicts the result); the tool's output
+is a ledger, not an input to the rebuild.

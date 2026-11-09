@@ -5,16 +5,21 @@ usage: python3 -I tools/exematch.py [ZIP] [OUTDIR]
 The programs shipped with Watcom C 6.5 (the .EXE and .COM files in the zip)
 were linked with its libraries, mostly the small-model one.  For every
 `inferred` module of OUTDIR/CLIBS.LIB and OUTDIR/CLIBC.LIB (default out/,
-rows from OUTDIR/PROVENANCE.csv) whose code is one fully populated CODE
-segment (LEDATA only) with at least MIN_LITERAL bytes outside fixup fields,
-the code is searched for in each program's load image (after the MZ
-header): every byte that is not a fixup field must match at one contiguous
-location.  Fixup fields are masked because the linker fills them.
+rows from OUTDIR/PROVENANCE.csv) whose code is one CODE segment (LEDATA
+only) with at least MIN_LITERAL bytes outside fixup fields, the code is
+searched for in each program's load image (after the MZ header): every
+byte that is not a fixup field must match at one contiguous location.
+Fixup fields are masked because the linker fills them; so are bytes no
+record defines (DOSPAWN's scratch word), which the linker leaves as they
+were.
 
-Prints CSV: library, module, code bytes, literal bytes, and the matches as
-FILE@hex file offset.  A match corroborates the module's instruction bytes
-only: not its data, its records, or where its relocations point.  The
-modules stay classified `inferred` (METHOD.md, section 17).
+Prints CSV: library, module, code bytes, literal bytes (those compared:
+outside fixup fields and defined), whether the whole code, fixup fields
+included, occurs as it is in some program, and the matches as FILE@hex
+file offset.  A match corroborates the module's instruction bytes only:
+not its fixup fields (a masked call operand may name another routine),
+its data, its records, or where its relocations point.  The modules stay
+classified `inferred` (METHOD.md, section 17).
 """
 
 import csv
@@ -33,8 +38,8 @@ FIXUP_SIZE = {0: 1, 1: 2, 2: 2, 3: 4, 4: 1}
 
 def code_and_mask(recs):
     """(code bytes, mask) of the module's single CODE segment, mask[i] true
-    where a fixup field lies; None when the module has no single fully
-    populated LEDATA code segment."""
+    where a fixup field lies or no record defines the byte; None when the
+    module has no single LEDATA code segment."""
     names = [n for r in recs if r['type'] == 0x96 for n in r['names']]
     segs = [r for r in recs if r['type'] == 0x98]
     code_segs = [i for i, r in enumerate(segs, 1)
@@ -63,8 +68,9 @@ def code_and_mask(recs):
                 p = last['off'] + f['at']
                 k = FIXUP_SIZE[f['loc']]
                 mask[p:p + k] = b'\1' * k
-    if not all(have):
-        return None
+    for i, h in enumerate(have):
+        if not h:
+            mask[i] = 1         # undefined in the object: the linker's too
     return bytes(code), bytes(mask)
 
 
@@ -128,7 +134,7 @@ def main(argv):
         rows = list(csv.DictReader(f))
     w = csv.writer(sys.stdout, lineterminator='\n')
     w.writerow(['library', 'module', 'code_bytes', 'literal_bytes',
-                'matches'])
+                'whole', 'matches'])
     count = {}
     for k in 'SC':
         lib = omf.Lib(os.path.join(outdir, 'CLIB%s.LIB' % k))
@@ -147,8 +153,10 @@ def main(argv):
             hits = find(code, lits, imgs)
             if hits:
                 count[k] = count.get(k, 0) + 1
+                whole = any(data.find(code, first) >= 0
+                            for first, data in imgs.values())
                 w.writerow([row['lib'], row['module'], len(code), nlit,
-                            ' '.join(hits)])
+                            'yes' if whole else 'no', ' '.join(hits)])
     sys.stderr.write('modules found in shipped programs: CLIBS %d, CLIBC %d\n'
                      % (count.get('S', 0), count.get('C', 0)))
     return 0

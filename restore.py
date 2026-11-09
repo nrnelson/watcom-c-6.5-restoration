@@ -57,9 +57,9 @@ import recompile  # noqa: E402
 
 EXPECTED = {
     'CLIBS.LIB':
-        '6cd1fee804d12b2e811709f6f2042354c0b80ea444e97257e377fb9e57bf3a81',
+        '9f7c970a5f65ccb40550f1d83e5864a0123c2cd36ae6b2446b61cbfd4186e22b',
     'CLIBC.LIB':
-        '9fea459aaaf22ef2feb5284f39c22244ad49312f2330684871566779c06445ae',
+        '1cd2b834f4848fdf635986f28b17f607ef3bdfb96eca97d71ea71b349f980e6b',
 }
 LIBS = ('CLIBS', 'CLIBC')
 
