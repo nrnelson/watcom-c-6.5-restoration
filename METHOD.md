@@ -42,9 +42,15 @@ Contents
 - Every rebuilt module must fill exactly the space the original module
   occupied, and must contain exactly the public names the intact library
   dictionary lists for it.
-- Every rule applied to a lost module is first tested on modules that did
-  survive.  A rule that makes any surviving module come out wrong is not
-  kept.
+- Every converter rule applied to a lost module is first tested on
+  modules that did survive.  A rule that makes any surviving module come
+  out wrong is not kept.  A recompiled module's test is that its source
+  gives the intact medium and large modules exactly, with two
+  exceptions: SIGNAL differs in one register choice there (section 9,
+  decision 2), and SETJMP's small and compact code is an edit of the far
+  code that those matches cannot test, checked for small against a
+  shipped program, and for compact by no shipped program (only the test
+  programs exercise it) (section 9, decision 4).
 - Nothing is "fixed" to make a check pass.  Where the evidence ran out, the
   choice made is written down as a decision, with the alternative.
 - Inferred bytes are never presented as original: every module carries its
@@ -625,10 +631,11 @@ SETJMP's functions are `#pragma aux` instruction lists written out per
 model, so its medium and large matches verify the far lists only, and
 nothing about the small-code lists, which are edits of them.  The small
 list is checked against the code a shipped small-model program, WLIB.EXE,
-calls; the compact list is not checked by anything.  The provenance notes
-this (`near-code-witnessed:DISK3/WLIB.EXE@2852` for small,
-`near-code-inferred` for compact) and grades both objects medium.  The
-sources are reconstructions written for this project, not Watcom's.
+calls; the compact list is checked by no shipped program; only the test
+programs exercise it.  The provenance notes this
+(`near-code-witnessed:DISK3/WLIB.EXE@2852` for small, `near-code-inferred`
+for compact) and grades both objects medium.  The sources are
+reconstructions written for this project, not Watcom's.
 
 Findings that came out of this work:
 
@@ -759,7 +766,13 @@ converted through code-pointer constructs (notes such as `call-far-indirect`,
 be the original's (`code-segment-renamed`, section 7.1), depending on a
 decision, or contradicted by a shipped program (`witness-differs`,
 section 17).  Low in both libraries: SPAWNVE, EXECADDR, DOINTR, DOEXEC,
-INT86, INT86X, SETVBUF; in CLIBS also REALLOC and SPRINTF.
+INT86, INT86X, SETVBUF; in CLIBS also REALLOC and SPRINTF.  A module that
+one shipped program contradicts while another holds the rebuilt code is
+noted `witness-mixed:FILE@hex` and keeps its level: the programs were
+linked from different builds, and the disagreement is not evidence
+against the rebuilt bytes (section 17; ISATTY in both libraries, GETCTIME
+in CLIBS, all `medium`).  `witness-differs` is for a module no program
+holds as rebuilt while one holds another form.
 
 
 ## 11. Decisions, with the evidence for each
@@ -945,8 +958,11 @@ tools run.
 - **An asm frame rule for `mov bp,sp`** broke FSMATH until stack releases
   (`add sp,n`) were counted.
 - **Watcom C 386 7.0** (the only 7.0 available) is the 32-bit edition with
-  32-bit libraries only; no bytes to take.  8.5 and 9.01 likewise; 9.5 and
-  later are a different code generator.  7.0 ships a few run-time sources
+  32-bit libraries only; no library bytes to take.  Its DOS programs are
+  16-bit and hold later builds of some of the run-time code, including
+  compact-model code; they serve as later witnesses only (section 17).
+  8.5 and 9.01 likewise have no library bytes to take; 9.5 and later are
+  a different code generator.  7.0 ships a few run-time sources
   (IOB.C, NFILES.C, WILDARGV.C, CMAIN386.C), useful only as reference.
 - **WCGL.EXE** in place of WCG.EXE: different output, no closer.
 - **Local declaration order** for register allocation: no effect.
@@ -1024,6 +1040,17 @@ python3 -I tools/rebuild.py -v              # section 10
 python3 -I tools/checklib.py out/CLIBS.LIB out/CLIBC.LIB
 python3 -I tools/difftest.py                # section 12
 python3 -I tools/periodcheck.py             # section 12
+python3 -I tools/exematch.py                # section 17
+```
+
+The later witnesses of section 17 come from the 7.0 distribution's disk
+images, read with mtools into one folder per image, then searched:
+
+```
+for n in 1 2 3 4 5 6; do
+  mkdir disk$n && mcopy -i disk$n.img -n "::*" disk$n/
+done
+python3 -I tools/exematch.py --programs DIR   # DIR holds disk1/ .. disk6/
 ```
 
 Regression checks to run after any change to the tools:
@@ -1107,7 +1134,7 @@ Tools:
 | `tools/selfcheck.py` | shows `checklib.py` rejects one-byte damage |
 | `tools/difftest.py` | builds and runs `tests/` in all four models, and T_INT as a tiny .COM |
 | `tools/periodcheck.py` | has the 1988 WLIB extract, and WLINK link, every module of a library |
-| `tools/exematch.py` | finds rebuilt code in the archive's own programs (section 17) |
+| `tools/exematch.py` | finds rebuilt code in the archive's own programs, or with `--programs` in other programs (section 17) |
 
 
 ## 16. Open questions
@@ -1135,7 +1162,8 @@ Tools:
 
 ## 17. Corroboration from the shipped programs
 
-Tool: `tools/exematch.py`.
+Tool: `tools/exematch.py`; `--programs DIR` searches other programs
+(the later witnesses below).
 
 The programs on the distribution disks (`WCL.EXE`, `WMAKE.EXE`,
 `WCPP.EXE` and others) were linked by Watcom with its own libraries,
@@ -1158,6 +1186,8 @@ CHAININT; CHAININT's match, in WCC.EXE, WCPP.EXE and WCEXP.EXE, appeared
 once its final RETF was restored (section 7.3).  The 6 compact matches
 (MOVEDATA, LSEEK, ISATTY, DOSPAWN, CHAININT, TIMEUTIL) are at the same
 places as the small ones: the same bytes, no compact-specific evidence.
+The later distribution supplies compact evidence for seven other modules
+(below).
 DOSPAWN's match covers 188 of its 240 code bytes; the two bytes no record
 defines (section 7.4) hold `46 70` in WCL.EXE and `20 6D` in WMAKE.EXE,
 whatever the linker's buffer held, which is itself evidence that the
@@ -1173,13 +1203,73 @@ was made to equal the `_setjmp` and `longjmp` that WLIB.EXE calls (section
 (`DISK3/WLIB.EXE@2852`).  Compact SETJMP passes the buffer in AX:DX, so
 its bytes differ from WLIB's and the tool does not list it.
 
+The DOS programs of Watcom C 386 7.0 are later witnesses.  Its archive,
+`Watcom C 386.ver.7.0.English.zip` (SHA-256
+`cd3972581f513d90aef6dc4c6957f4395e4e7be52f147f23db6e3aaea04df4c0`), from
+the same Internet Archive collection as 6.5, holds six 360 KB disk
+images, `disk1.img` to `disk6.img`, not plain files; the programs were
+read out of them with mtools (`mcopy`, section 15).  Its libraries are
+32-bit, but its tools are 16-bit DOS programs linked with a later build
+of the 16-bit run-time.  The same search over the 15 .EXE and .COM files
+of the six images finds 26 rebuilt small modules and 11 compact ones.
+Nine of them are found in no 6.5 program: 2 small and 7 compact.
+
+| library | module | program@file offset | literal/code bytes | whole |
+|---|---|---|---|---|
+| CLIBC | UNLINK | disk1/WDISASM.EXE@7383 | 22/24 | no |
+| CLIBC | DOSRET | disk1/WDISASM.EXE@6e18 | 79/87 | no |
+| CLIBC | STRLEN | disk1/WDISASM.EXE@768e | 23/23 | yes |
+| CLIBC | STRERROR | disk1/WDISASM.EXE@5e1a | 26/30 | no |
+| CLIBC | STRCPY | disk1/WDISASM.EXE@76ed | 43/43 | yes |
+| CLIBC | STRCMP | disk1/WDISASM.EXE@76a5 | 44/44 | yes |
+| CLIBC | STRCAT | disk1/WDISASM.EXE@7434 | 51/51 | yes |
+| CLIBS | MAKEPATH | disk1/WTOUCH.EXE@1538 | 131/131 | yes |
+| CLIBS | SETVBUF | disk3/WCPP386.EXE@56b6 | 51/55 | no |
+
+The programs, by SHA-256 of the extracted file: `disk1/WDISASM.EXE`
+`e1977f0dec244b9522bc8d5b87e285afa40e81a8cb80e4f572cb586d49310559`,
+`disk3/WCPP386.EXE`
+`d17aaffafa72839df37e3c042e502bfd1d350c39c7d45146aab22f38dccdcc5b`,
+`disk1/WTOUCH.EXE`
+`1cd52f528c14830a34b08e21c61603f9fcf00a570f5fde2ae87d3d7364c2f69d`.
+The seven compact modules compare 288 of their 302 code bytes, and four
+occur whole, fixup fields included.  At each of the nine places the
+same-named module of the other four libraries (small or compact, medium,
+large, huge) does not match, so each match identifies the model.  The
+small STRLEN, STRCPY, STRCMP and STRCAT occur nowhere in WDISASM.EXE:
+WDISASM is a compact-model program, and these are the first witnesses
+specific to compact code.  Two checks go past the masked bytes.
+UNLINK's one call (opcode at WDISASM 0x7392) reaches 0x6e27, DOSRET's
+start 0x6e18 plus 0xf, the offset of `_set_errno_` in the rebuilt
+compact DOSRET.  Compact STRERROR's two masked operands, at +21 and +26,
+load the two words of a far pointer from a table at WDISASM 0x8f7a (its
+data segment found through the MZ relocations); all 16 far pointers of
+the table have loader relocations, and the 16 messages they reach equal,
+by index, the strings of the rebuilt compact STRERROR's data segment.
+
+These programs witness a later build of the run-time, not the 6.5
+libraries, so they are weaker evidence than a 6.5 program.  Their counts
+are kept apart from the 6.5 results (59 small, 6 compact), and they
+change no grade: a matching witness never raises one (below).
+
 The shipped programs are witnesses to the builds they were linked from,
 not to the library on the disks, and they disagree among themselves.
-Small GETCTIME matches WMAKE.EXE; the GETCTIME that WTOUCH.EXE's TIME
-calls (the TIME itself matches) lacks one five-byte store, `C7 47 10 FF
-FF`, and is otherwise identical.  And the REALLOC that WMAKE.EXE's PUTENV
-calls has the same instructions as the rebuilt small REALLOC with the
-other sizes for its two jumps to the shared exit (section 7.3): the
+Small GETCTIME is found in WMAKE.EXE, INSTALL.EXE and WCPP.EXE, and the
+matched small TIME in each calls it there; the GETCTIME that WTOUCH.EXE's
+TIME calls (the TIME itself matches) lacks one five-byte store, `C7 47 10
+FF FF` (-1 to `tm_isdst`), and is otherwise identical: the module is
+noted `witness-mixed:DISK3/WTOUCH.EXE@14b9`.  Small ISATTY, 28 code bytes
+with no fixup fields, occurs whole in INSTALL.EXE, WCL.EXE, WCPP.EXE,
+EXE2COM.COM, WLIB.EXE and WMAKE.EXE, and the surviving small `cmain`
+calls it in five of them; the same `cmain` in WSTRIP.EXE and WTOUCH.EXE
+calls a 25-byte routine instead, identical in both, which loads AH and AL
+separately, saves no CX and has no `sbb cx,cx`, but tests the same bit
+of DX after the same IOCTL 4400h call.  Compact ISATTY has the same 28
+bytes, so both ISATTY rows are noted
+`witness-mixed:DISK3/WSTRIP.EXE@1309` and
+`witness-mixed:DISK3/WTOUCH.EXE@14a0`.  And the REALLOC that WMAKE.EXE's
+PUTENV calls has the same instructions as the rebuilt small REALLOC with
+the other sizes for its two jumps to the shared exit (section 7.3): the
 rebuilt module is noted `witness-differs:DISK3/WMAKE.EXE@5448` in the
 provenance and graded low.  The alternative was not adopted: the jump
 rule was tested on the surviving modules, so the rebuild has evidence of
@@ -1190,16 +1280,26 @@ stack (section 9): that module is noted
 `witness-differs:DISK1/INSTALL.EXE@2b1e` and graded low, and its bytes
 stay, since the source compiled with `/os` reproduces the intact medium
 and large SPRINTF and the switches that give the witnessed bytes do not.
+The rule: when the programs disagree about a module and at least one of
+them holds the rebuilt code (all literal bytes, as the tool finds it),
+the disagreement is between the builds they were linked from, not
+evidence against the rebuilt bytes; the grade stands and each differing
+routine is recorded as `witness-mixed:FILE@hex` (ISATTY, GETCTIME).  When
+no program holds the rebuilt code and one holds another form, the module
+is noted `witness-differs:FILE@hex` and graded low (REALLOC, SPRINTF).
 
 This corroborates the instruction bytes of those modules only: not their
 fixup fields, their data segments, their record layout and other
 object-file metadata, or where their relocations point.  The modules
 therefore stay classified `inferred`, and their confidence is not raised
-(it is lowered where a witness contradicts the result).  The tool's
-output is a ledger, not an input to the rebuild, with one exception:
-where a reconstruction had to choose with no evidence of its own, the
-shipped code decides (SETJMP's near-code list).  Where the reconstruction
+(it is lowered where a witness contradicts the result and no program
+holds the rebuilt code).  The tool's output is a ledger, not an input to
+the rebuild, with one exception: where a reconstruction had to choose
+with no evidence of its own, the shipped code decides (SETJMP's
+near-code list).  Where the reconstruction
 has evidence of its own, a rule tested on the survivors or switches that
 reproduce the intact medium and large objects, a contradicting program
-lowers the grade and is recorded, and the bytes stay (REALLOC and
-SPRINTF).
+lowers the grade and is recorded when no program holds the rebuilt code,
+and the bytes stay (REALLOC and SPRINTF); when another program does hold
+it, the module is noted `witness-mixed` and the grade stands (ISATTY,
+GETCTIME).

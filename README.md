@@ -89,7 +89,9 @@ Before starting, I looked for another copy, without success:
 
 - The Internet Archive collection above holds only this one copy of 6.5;
   its "7.0" is WATCOM C 386 7.0, the 32-bit protected-mode edition, which
-  has no 16-bit libraries at all.
+  has no 16-bit libraries at all, so it supplies no bytes.  Its 16-bit DOS
+  programs hold later builds of some rebuilt routines, used as witnesses
+  only (METHOD.md, section 17).
 - Later versions (8.x to 11.0) have a different code generator and
   run-time library, so they cannot supply 6.5's bytes.
 - The WATCOM Express C library shipped with 6.5 (`WCEXPL.LIB`) has 591
@@ -132,15 +134,21 @@ decisions taken and the hypotheses that failed, is in
    pointers to functions): C source was reconstructed by reading the
    machine code, until Watcom C 6.5 compiled it to exactly the bytes of the
    intact medium and large libraries; the same source is then compiled for
-   small and compact.
+   small and compact.  Two exceptions: SIGNAL is accepted with one
+   register choice differing in medium and large (METHOD.md, decision 2);
+   SETJMP's small and compact code is an edit of the far code, matched
+   for small against the `_setjmp` and `longjmp` a shipped small-model
+   program calls, and checked by no shipped program for compact
+   (decision 4).
 5. **Assemble** both libraries with every module at its original position,
    filling exactly its original space, matching every surviving byte, and
    naming exactly the symbols the original dictionary lists.
 6. **Test** real programs built in all four models and compare their
    output.
 
-Every rule was tested on the modules that survived before it was used on
-the ones that were lost.
+Every converter rule was tested on the modules that survived before it
+was used on the ones that were lost; the recompiled modules rest on the
+medium and large matches instead, with the two exceptions above.
 
 
 ## Results

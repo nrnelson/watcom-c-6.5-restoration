@@ -129,6 +129,21 @@ WITNESS_DIFFERS = {
     ('CLIBS', 'SPRINTF'): 'DISK1/INSTALL.EXE@2b1e',
 }
 
+# Rebuilt modules the shipped programs disagree about (METHOD.md section
+# 17): some programs hold the rebuilt code, these others call a different
+# routine.  The disagreement is between the builds the programs were
+# linked from, so the grade stands.  Noted 'witness-mixed:FILE@hex'.
+WITNESS_MIXED = {
+    # six programs hold the rebuilt 28-byte isatty; the cmain of WSTRIP
+    # and WTOUCH calls a 25-byte one that loads AH and AL separately and
+    # neither saves CX nor uses sbb cx,cx (the compact code is the same)
+    ('CLIBS', 'ISATTY'): ['DISK3/WSTRIP.EXE@1309', 'DISK3/WTOUCH.EXE@14a0'],
+    ('CLIBC', 'ISATTY'): ['DISK3/WSTRIP.EXE@1309', 'DISK3/WTOUCH.EXE@14a0'],
+    # WMAKE, INSTALL and WCPP hold the rebuilt _getctime; the one WTOUCH's
+    # TIME calls lacks the store of -1 to tm_isdst (C7 47 10 FF FF)
+    ('CLIBS', 'GETCTIME'): ['DISK3/WTOUCH.EXE@14b9'],
+}
+
 
 def confidence(row):
     """high / medium / low for a rebuilt module, from its route and notes
@@ -158,6 +173,8 @@ def confidence(row):
         level = 'medium'
     if any(n.startswith('witness-differs:') for n in notes):
         level = 'low'
+    # 'witness-mixed:' leaves the level as it is: another shipped program
+    # holds the rebuilt code, so the differing one witnesses another build
     return level
 
 
@@ -367,6 +384,8 @@ def main(argv):
                 witness = WITNESS_DIFFERS.get((row['lib'], dname))
                 if witness:
                     notes = (notes + ' witness-differs:' + witness).strip()
+                for witness in WITNESS_MIXED.get((row['lib'], dname), []):
+                    notes = (notes + ' witness-mixed:' + witness).strip()
                 # repaired bytes of this library inside the span
                 repaired = repair_note(k, start, end)
                 row['notes'] = '; '.join(x for x in (notes, repaired) if x)
