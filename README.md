@@ -18,18 +18,18 @@ archive with one command, on Linux or Windows.
 
 **The restored libraries are reconstructions, not the originals.**
 Without an undamaged copy of the files, or a checksum of them, the result
-cannot be proven identical to what Watcom shipped.  Everything that survived is kept
-byte for byte; everything rebuilt is labelled, module by module, with how
+cannot be proven identical to what Watcom shipped.  Everything that survived is
+kept byte for byte; everything rebuilt is labelled, module by module, with how
 it was made and how confident the reconstruction is.
 
 
 ## Why this matters
 
-Watcom grew out of the University of Waterloo, and its C compiler became one of the most
-respected optimising compilers of the DOS era.  Its code generator shaped
-a generation of PC software, its descendants were used to build classics
-such as *DOOM*, and its source was eventually released as Open Watcom,
-which is still maintained today.  Version 6.5 is, as far as I can tell,
+Watcom grew out of the University of Waterloo, and its C compiler became one of
+the most respected optimising compilers of the DOS era.  Its code generator
+shaped a generation of PC software, its descendants were used to build classics
+such as *DOOM*, and its source was eventually released as Open Watcom, which is
+still maintained today.  Version 6.5 is, as far as I can tell,
 where the surviving record of that line begins: I have not been able to
 find a copy of 6.0 or anything earlier, though that does not mean none
 exists.

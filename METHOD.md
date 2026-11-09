@@ -568,11 +568,12 @@ there (section 17).
 
 ### 7.5 Notes
 
-The converter records every non-trivial thing it did or could not do as a
-note in the provenance (e.g. `call-far-indirect`, `cross-jump`,
-`stack-check-size`, `overlapping-insns`, `guessed-code`,
-`code-segment-ref`, `code-segment-renamed`, `retf-jump-kept`).  Section 8 measures how often modules with each note
-were exact; section 10 turns that into confidence levels.
+The converter records every non-trivial thing it did or could not do as a note
+in the provenance (e.g. `call-far-indirect`, `cross-jump`, `stack-check-size`,
+`overlapping-insns`, `guessed-code`, `code-segment-ref`,
+`code-segment-renamed`, `retf-jump-kept`).  Section 8 measures how often
+modules with each note were exact; section 10 turns that into confidence
+levels.
 
 
 ## 8. Scoring the converter on the surviving modules
@@ -739,13 +740,12 @@ Findings that came out of this work:
   the small and compact objects, is not accepted; and `rebuild.py` uses an
   object only when `recompile.py`'s status file vouches for its SHA-256.
 - **FMALLOC, SPAWNVE**: attempted; close (FMALLOC about 75% of the disassembly
-  equal, SPAWNVE a few register choices off) but not reproduced; not used.  SPAWNVE's attempt showed `__dospawn`
-  takes near pointers in every model and `_execaddr` returns a far
-  pointer.
+  equal, SPAWNVE a few register choices off) but not reproduced; not used.
+  SPAWNVE's attempt showed `__dospawn` takes near pointers in every model and
+  `_execaddr` returns a far pointer.
 - Declaration order of local variables does not affect 6.5's register
-  allocation (all 120 orders of one function's locals, and 53 of 720 of another's,
-  gave the same code);
-  it does decide the stack layout of locals.
+  allocation (all 120 orders of one function's locals, and 53 of 720 of
+  another's, gave the same code); it does decide the stack layout of locals.
 
 
 ## 10. Assembling the rebuilt libraries
@@ -1000,8 +1000,8 @@ tools run.
   previous handler's offset in the current code segment and left its segment
   word on the stack.  The INT 23h handler of the recompiled SIGNAL calls it.
   Corrected by the window rule of section 7.3.
-- **A "RETF used as a jump" rule that counted `mov sp,bp` as a stack
-  switch**: it turned normal epilogues into jumps and broke 17 surviving small modules;
+- **A "RETF used as a jump" rule that counted `mov sp,bp` as a stack switch**:
+  it turned normal epilogues into jumps and broke 17 surviving small modules;
   corrected (section 7.3).
 - **An asm frame rule for `mov bp,sp`** broke FSMATH until stack releases
   (`add sp,n`) were counted.
@@ -1072,7 +1072,8 @@ with the zip in the repository folder, Python and DOSBox-X:
 
 ```
 python3 restore.py             # everything, ending with the hash check
-python3 restore.py --test      # and the test programs in all four models (and tiny)
+python3 restore.py --test      # and the test programs in all four models
+                               # (and tiny)
 ```
 
 The individual steps, each a tool that can be run alone:
@@ -1092,13 +1093,17 @@ python3 -I tools/exematch.py                # section 17
 ```
 
 The later witnesses of section 17 come from the 7.0 distribution's disk
-images, read with mtools into one folder per image, then searched:
+images, read with mtools into one folder per image.  Disk 6 also carries
+a zip, `DISK-6.ZIP`, whose programs the search must see, so the zip is
+unpacked into `disk6/DISK-6/`; then the folders are searched:
 
 ```
 for n in 1 2 3 4 5 6; do
   mkdir disk$n && mcopy -i disk$n.img -n "::*" disk$n/
 done
-python3 -I tools/exematch.py --programs DIR   # DIR holds disk1/ .. disk6/
+mkdir disk6/DISK-6 && unzip -q disk6/DISK-6.ZIP -d disk6/DISK-6
+python3 -I tools/exematch.py --programs DIR   # DIR holds disk1/ .. disk6/,
+                                              # disk6/DISK-6/ included
 ```
 
 Regression checks to run after any change to the tools:
@@ -1237,7 +1242,7 @@ CHAININT; CHAININT's match, in WCC.EXE, WCPP.EXE and WCEXP.EXE, appeared
 once its final RETF was restored (section 7.3).  The 6 compact matches
 (MOVEDATA, LSEEK, ISATTY, DOSPAWN, CHAININT, TIMEUTIL) are at the same
 places as the small ones: the same bytes, no compact-specific evidence.
-The later distribution supplies compact evidence for seven other modules
+The later distribution supplies compact evidence for nine other modules
 (below).
 DOSPAWN's match covers 188 of its 240 code bytes; the two bytes no record
 defines (section 7.4) hold `46 70` in WCL.EXE and `20 6D` in WMAKE.EXE,
@@ -1262,11 +1267,15 @@ The DOS programs of Watcom C 386 7.0 are later witnesses.  Its archive,
 `cd3972581f513d90aef6dc4c6957f4395e4e7be52f147f23db6e3aaea04df4c0`), from
 the same Internet Archive collection as 6.5, holds six 360 KB disk
 images, `disk1.img` to `disk6.img`, not plain files; the programs were
-read out of them with mtools (`mcopy`, section 15).  Its libraries are
-32-bit, but its tools are 16-bit DOS programs linked with a later build
-of the 16-bit run-time.  The same search over the 15 .EXE and .COM files
-of the six images finds 26 rebuilt small modules and 11 compact ones.
-Nine of them are found in no 6.5 program: 2 small and 7 compact.
+read out of them with mtools (`mcopy`, section 15).  One of them,
+`disk6.img`, also carries a zip, `DISK-6.ZIP` (SHA-256
+`2646c8c8e99b2eebe6830ed5a862ce28e0a19ab768cf1fa8d6ba650ece5e931d`,
+160 files), unpacked into `disk6/DISK-6/`; it holds two more DOS
+programs.  The distribution's libraries are 32-bit, but its tools are
+16-bit DOS programs linked with a later build of the 16-bit run-time.
+The same search over the 17 .EXE and .COM files (15 on the images, 2 in
+the zip) finds 26 rebuilt small modules and 13 compact ones.  Eleven of
+them are found in no 6.5 program: 2 small and 9 compact.
 
 | library | module | program@file offset | literal/code bytes | whole |
 |---|---|---|---|---|
@@ -1277,6 +1286,8 @@ Nine of them are found in no 6.5 program: 2 small and 7 compact.
 | CLIBC | STRCPY | disk1/WDISASM.EXE@76ed | 43/43 | yes |
 | CLIBC | STRCMP | disk1/WDISASM.EXE@76a5 | 44/44 | yes |
 | CLIBC | STRCAT | disk1/WDISASM.EXE@7434 | 51/51 | yes |
+| CLIBC | STRICMP | disk6/DISK-6/NLMLINK.EXE@82bd | 65/65 | yes |
+| CLIBC | STRCHR | disk6/DISK-6/NLMLINK.EXE@80b7 | 54/54 | yes |
 | CLIBS | MAKEPATH | disk1/WTOUCH.EXE@1538 | 131/131 | yes |
 | CLIBS | SETVBUF | disk3/WCPP386.EXE@56b6 | 51/55 | no |
 
@@ -1285,17 +1296,29 @@ The programs, by SHA-256 of the extracted file: `disk1/WDISASM.EXE`
 `disk3/WCPP386.EXE`
 `d17aaffafa72839df37e3c042e502bfd1d350c39c7d45146aab22f38dccdcc5b`,
 `disk1/WTOUCH.EXE`
-`1cd52f528c14830a34b08e21c61603f9fcf00a570f5fde2ae87d3d7364c2f69d`.
-The seven compact modules compare 288 of their 302 code bytes, and four
-occur whole, fixup fields included.  At each of the nine places the
+`1cd52f528c14830a34b08e21c61603f9fcf00a570f5fde2ae87d3d7364c2f69d`,
+`disk6/DISK-6/NLMLINK.EXE`
+`d303e98393e83d5bff83a82a18212f026ed613fc3152c18317bcdd4055077354`,
+`disk6/DISK-6/TUTORIAL/TSNIPES.EXE`
+`2d1baba6b66679c4b390bc2cff9238f9de37d09711a52365fd3e6520174e6da5`.
+The nine compact modules compare 407 of their 421 code bytes, and six
+occur whole, fixup fields included.  At each of the eleven places the
 same-named module of the other four libraries (small or compact, medium,
 large, huge) does not match, so each match identifies the model.  The
 small STRLEN, STRCPY, STRCMP and STRCAT occur nowhere in WDISASM.EXE:
 WDISASM is a compact-model program, and these are the first witnesses
-specific to compact code.  Two checks go past the masked bytes.
-UNLINK's one call (opcode at WDISASM 0x7392) reaches 0x6e27, DOSRET's
-start 0x6e18 plus 0xf, the offset of `_set_errno_` in the rebuilt
-compact DOSRET.  Compact STRERROR's two masked operands, at +21 and +26,
+specific to compact code.  NLMLINK.EXE is a compact-model program too:
+it holds compact UNLINK (@7eef), DOSRET (@67f0), STRLEN (@8173), STRCPY
+(@8ea4), STRCMP (@818a) and STRCAT (@7ebc), the same six that WDISASM.EXE
+witnesses, and the compact STRICMP and STRCHR of the table, whose small
+modules occur nowhere in it; neither of those two matches masks a byte.
+TSNIPES.EXE adds no module: every module it holds, 6.5 programs also
+witness.
+Two checks go past the masked bytes.  UNLINK's one call (opcode at
+WDISASM 0x7392) reaches 0x6e27, DOSRET's start 0x6e18 plus 0xf, the
+offset of `_set_errno_` in the rebuilt compact DOSRET; in NLMLINK the
+call (opcode at 0x7efe) reaches 0x67ff, DOSRET's start 0x67f0 plus 0xf,
+the same offset.  Compact STRERROR's two masked operands, at +21 and +26,
 load the two words of a far pointer from a table at WDISASM 0x8f7a (its
 data segment found through the MZ relocations); all 16 far pointers of
 the table have loader relocations, and the 16 messages they reach equal,
