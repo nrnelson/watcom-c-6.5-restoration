@@ -302,7 +302,7 @@ compares the result with the published restoration.  It ends with:
 
 ```
 out/CLIBS.LIB: 250 modules ok
-  SHA-256 74d7dcfc7051e312e395bd67a0d1058fe645f960b0b8988494e13913cfbd0e97: identical to the published restoration
+  SHA-256 27ba210a1c1bc70960169e82a2cc09e9ce167c6c7b504985b4735cd95606a3ca: identical to the published restoration
 out/CLIBC.LIB: 250 modules ok
   SHA-256 a708a545ecd064717e7ccfb4e3b3e613472ae294d4476c86fafe94e353a81627: identical to the published restoration
 ```
@@ -398,6 +398,7 @@ row is what `restore.py` makes now.
 | 3 | `6cd1fee804d12b2e811709f6f2042354c0b80ea444e97257e377fb9e57bf3a81` | `9fea459aaaf22ef2feb5284f39c22244ad49312f2330684871566779c06445ae` |
 | 4 | `9f7c970a5f65ccb40550f1d83e5864a0123c2cd36ae6b2446b61cbfd4186e22b` | `1cd2b834f4848fdf635986f28b17f607ef3bdfb96eca97d71ea71b349f980e6b` |
 | 5 | `74d7dcfc7051e312e395bd67a0d1058fe645f960b0b8988494e13913cfbd0e97` | `a708a545ecd064717e7ccfb4e3b3e613472ae294d4476c86fafe94e353a81627` |
+| 6 | `27ba210a1c1bc70960169e82a2cc09e9ce167c6c7b504985b4735cd95606a3ca` | (as 5) |
 
 What changed in the libraries:
 
@@ -421,6 +422,11 @@ What changed in the libraries:
   di`, as the `_setjmp` and `longjmp` that WLIB.EXE calls do (section 9);
   the previous form left that slot untouched.  Programs linked with the
   row 4 libraries need no relink.
+- 5 to 6, no change in behaviour: five alignment bytes between string
+  literals in small SPAWNVE, SYSTEM and STRERROR take the values the
+  shipped WCL.EXE, WMAKE.EXE and WCPP.EXE hold (METHOD.md, section 7.4);
+  nothing reads those bytes.  Programs linked with the row 5 libraries
+  need no relink.
 
 If you installed earlier libraries, run the restoration again, reinstall
 them, and relink programs that use `int86` or `int86x` (compact model),

@@ -144,6 +144,42 @@ WITNESS_MIXED = {
     ('CLIBS', 'GETCTIME'): ['DISK3/WTOUCH.EXE@14b9'],
 }
 
+# Alignment bytes between string literals that a shipped small-model
+# program contradicts (METHOD.md section 7.4, decision 6): the converter
+# copies the donor's byte, which is leftover compiler memory and does not
+# carry over (TZSET, ASCTIME, section 8), so the program decides.
+# (lib, module): [(segment index, offset, donor byte, byte,
+#                  'FILE@hex of the byte')]
+WITNESSED_PADS = {
+    # '.exe', pad, '.com'; WMAKE.EXE@6d4d holds the same block
+    ('CLIBS', 'SPAWNVE'): [(2, 0x05, 0xB2, 0x00, 'DISK1/WCL.EXE@2b91')],
+    # '/c', pad, 'COMMAND', 'COMSPEC'
+    ('CLIBS', 'SYSTEM'): [(2, 0x03, 0x08, 0x89, 'DISK3/WMAKE.EXE@6d57')],
+    # the message strings the pointer table (segment 3) points into
+    ('CLIBS', 'STRERROR'): [(2, 0x2F, 0xA1, 0x00, 'DISK2/WCPP.EXE@8a4b'),
+                            (2, 0x43, 0x0A, 0x00, 'DISK2/WCPP.EXE@8a5f'),
+                            (2, 0x95, 0x59, 0x84, 'DISK2/WCPP.EXE@8ab1')],
+}
+
+
+def apply_witnessed_pads(recs, key):
+    """Write the WITNESSED_PADS bytes for KEY (lib, module) into the
+    LEDATA records RECS of a converted module, in place; return the notes
+    'pad-witnessed:FILE@hex', one per byte.  Each byte must still be the
+    donor's; omfrec.module_bytes recomputes the record checksums."""
+    notes = []
+    for seg, off, donor, byte, witness in WITNESSED_PADS.get(key, []):
+        hits = [r for r in recs if r['type'] == 0xA0 and r['seg'] == seg
+                and r['off'] <= off < r['off'] + len(r['data'])]
+        assert len(hits) == 1, (key, seg, off)
+        r = hits[0]
+        data = bytearray(r['data'])
+        assert data[off - r['off']] == donor, (key, seg, off)
+        data[off - r['off']] = byte
+        r['data'] = bytes(data)
+        notes.append('pad-witnessed:' + witness)
+    return notes
+
 
 def confidence(row):
     """high / medium / low for a rebuilt module, from its route and notes
@@ -169,7 +205,11 @@ def confidence(row):
     # bytes, not the object's records
     near = any(n == 'near-code-inferred' or
                n.startswith('near-code-witnessed:') for n in notes)
-    if level == 'high' and ('name-case-from-dictionary' in notes or near):
+    # likewise an alignment byte written from a shipped program
+    # (WITNESSED_PADS) never raises the grade: it demotes a high to medium
+    pad = any(n.startswith('pad-witnessed:') for n in notes)
+    if level == 'high' and ('name-case-from-dictionary' in notes or near
+                            or pad):
         level = 'medium'
     if any(n.startswith('witness-differs:') for n in notes):
         level = 'low'
@@ -346,9 +386,10 @@ def main(argv):
                 recs, notes = convert.convert(
                     omfrec.decode_module(src.module(src.starts[i])),
                     'CLIB' + SOURCE[k])
+                pads = apply_witnessed_pads(recs, ('CLIB%s' % k, dname))
                 cands.append(('convert', omfrec.module_bytes(recs),
                               ' '.join(sorted({n.split('@')[0]
-                                               for n in notes}))))
+                                               for n in notes}) + pads)))
             except convert.Unsupported as e:
                 row.setdefault('tried', []).append('convert: %s' % e)
             fixed = []

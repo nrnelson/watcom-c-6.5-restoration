@@ -519,6 +519,44 @@ Record order:
 - Then the data segments, data publics, the model marker EXTDEF and MODEND,
   as in the source module.
 
+Alignment bytes.  A data segment's string literals are word-aligned with
+`/ot` or `/ox`, and the alignment byte between two strings is whatever
+the compiler's buffer held (section 6).  The converter copies each data
+segment from the medium or large donor unchanged, so a rebuilt module's
+alignment bytes are the donor's.  The survivors show that such a byte
+does not carry over: small TZSET's is `54` where medium has `CE`, small
+ASCTIME's `02` where medium has `4A` (section 8), while every other byte
+of the 259 small and 250 compact surviving data segments equals the
+donor's.  So the converter has no evidence of its own for these bytes,
+and five of them, in three small modules, are written from the shipped
+6.5 programs that hold the module's code (section 17; section 11,
+decision 6).  In each program the code's DGROUP-relative operands were
+resolved through the startup's `mov ax,DGROUP` word, which carries an MZ
+relocation, to the string block, and every other byte of the block
+equals the rebuilt segment:
+
+| module | segment, offset | donor | program | program@file offset |
+|---|---|---|---|---|
+| SPAWNVE | 2, +5 | `B2` | `00` | DISK1/WCL.EXE@2b91, DISK3/WMAKE.EXE@6d4d |
+| SYSTEM | 2, +3 | `08` | `89` | DISK3/WMAKE.EXE@6d57 |
+| STRERROR | 2, +0x2F | `A1` | `00` | DISK2/WCPP.EXE@8a4b |
+| STRERROR | 2, +0x43 | `0A` | `00` | DISK2/WCPP.EXE@8a5f |
+| STRERROR | 2, +0x95 | `59` | `84` | DISK2/WCPP.EXE@8ab1 |
+
+SPAWNVE's block is `.exe`, pad, `.com`; SYSTEM's `/c`, pad, `COMMAND`,
+`COMSPEC`; STRERROR's is the 306-byte message segment that its pointer
+table (segment 3) points into.  The medium forms of the same blocks
+occur in DISK7/WCEXP.EXE (SPAWNVE at 0x38000, SYSTEM at 0x38162,
+STRERROR at 0x37caa) and, for STRERROR, DISK1/WCC.EXE at 0x17ad0, all
+programs whose code for the module is the medium one.  SYSTEM and
+STRERROR rest on one program each.  The rebuilt module is noted
+`pad-witnessed:FILE@hex` for each byte.  The other alignment bytes keep
+the donor's value, since nothing witnesses them: small EXECVE (1 pad)
+and STRFTIME (19); compact EXECVE (1), SPAWNVE (1), STRERROR (3),
+STRFTIME (19), SYSTEM (1) and TZSET (1).  No compact-model 6.5 program
+exists to check them, and the 7.0 programs hold different string
+blocks.  Small TZSET survives.  Nothing reads an alignment byte.
+
 Assembler modules (no source-name COMENT) keep the source module's record
 order, with LEDATA up to 1020 bytes.  Bytes that no record of the source
 module defines stay undefined: DOSPAWN's assembler source left one word
@@ -760,7 +798,10 @@ converter strongly but is not an independent prediction.
 CLIBL exact, or the cross route; `medium` = converted with no risky note,
 a near-exact recompile, or a recompile whose near-code instruction lists
 are edits of the far ones (SETJMP, section 9: `near-code-inferred`, or
-`near-code-witnessed:` when a shipped program holds the code); `low` =
+`near-code-witnessed:` when a shipped program holds the code); a byte
+written from a shipped program (`near-code-witnessed:`, or
+`pad-witnessed:` for an alignment byte, section 7.4) never raises the
+level; `low` =
 converted through code-pointer constructs (notes such as `call-far-indirect`,
 `code-segment-ref`), a renamed code segment whose record encoding cannot
 be the original's (`code-segment-renamed`, section 7.1), depending on a
@@ -813,6 +854,13 @@ holds as rebuilt while one holds another form.
 5. **The six lower-case CLIBS modules** are rebuilt from CLIBM with the
    dictionary's names; a separate compile may have used other sources,
    which nothing can show.
+6. **Five alignment bytes follow the shipped programs** (small SPAWNVE,
+   SYSTEM and STRERROR; section 7.4).  The converter has no evidence of
+   its own for these bytes: it copies the donor's, and the survivors
+   (TZSET, ASCTIME) refute that copy.  So the shipped code decides, as
+   for SETJMP's near-code list (decision 4): WCL.EXE and WMAKE.EXE for
+   SPAWNVE, WMAKE.EXE alone for SYSTEM, WCPP.EXE alone for STRERROR.  No
+   behaviour depends on them: nothing reads an alignment byte.
 
 
 ## 12. Testing in real use
@@ -1070,7 +1118,7 @@ first compact library, and the `intr` part of T_INT and T_CHAIN on every
 earlier small and compact library.
 
 Expected results: `out/CLIBS.LIB` SHA-256
-`74d7dcfc7051e312e395bd67a0d1058fe645f960b0b8988494e13913cfbd0e97`,
+`27ba210a1c1bc70960169e82a2cc09e9ce167c6c7b504985b4735cd95606a3ca`,
 `out/CLIBC.LIB` SHA-256
 `a708a545ecd064717e7ccfb4e3b3e613472ae294d4476c86fafe94e353a81627`.
 Earlier outputs: CLIBS
@@ -1081,7 +1129,10 @@ CHAININT's final RETF was restored (section 7.3), then
 before DOSPAWN's undefined word was left undefined (section 7.4) and
 STAT's four-byte exit was shared (section 7.3), then
 `9f7c970a5f65ccb40550f1d83e5864a0123c2cd36ae6b2446b61cbfd4186e22b`,
-before SETJMP's near-code form followed WLIB.EXE (section 9); CLIBC
+before SETJMP's near-code form followed WLIB.EXE (section 9), then
+`74d7dcfc7051e312e395bd67a0d1058fe645f960b0b8988494e13913cfbd0e97`,
+before five alignment bytes followed the shipped programs (section 7.4);
+CLIBC
 `b53e05b77252a952e0896abc3612846bae2a10f4c584d1fa682e752b6e24bcae`,
 before the frame rule of section 7.3 corrected the `int86` and `int86x`
 offsets, then
@@ -1090,7 +1141,7 @@ before the same two changes as the first CLIBS, then
 `9fea459aaaf22ef2feb5284f39c22244ad49312f2330684871566779c06445ae`,
 before the DOSPAWN change, then
 `1cd2b834f4848fdf635986f28b17f607ef3bdfb96eca97d71ea71b349f980e6b`,
-before the SETJMP change.  The last three changes alter no behaviour.
+before the SETJMP change.  The last four changes alter no behaviour.
 The whole process is deterministic: the same zip gives the same bytes on
 any machine.
 
@@ -1194,14 +1245,17 @@ whatever the linker's buffer held, which is itself evidence that the
 object left them undefined.  For SPAWNVE a further check followed the
 linked far call to its target (section 11, decision 3).
 
-Small SETJMP is the one module whose bytes were written from a shipped
-program.  Its near-code instruction list is an edit of the far one, and
+Small SETJMP is the one module whose code bytes were written from a
+shipped program.  Its near-code instruction list is an edit of the far one, and
 the project had no other evidence for that edit: the medium and large
 matches do not test it, and no small or compact SETJMP survives.  The list
 was made to equal the `_setjmp` and `longjmp` that WLIB.EXE calls (section
 9), and the tool finds it there whole, all 84 code bytes
 (`DISK3/WLIB.EXE@2852`).  Compact SETJMP passes the buffer in AX:DX, so
-its bytes differ from WLIB's and the tool does not list it.
+its bytes differ from WLIB's and the tool does not list it.  Five
+alignment bytes of the data segments of small SPAWNVE, SYSTEM and
+STRERROR were likewise written from the programs that hold their code
+(section 7.4).
 
 The DOS programs of Watcom C 386 7.0 are later witnesses.  Its archive,
 `Watcom C 386.ver.7.0.English.zip` (SHA-256
@@ -1290,16 +1344,18 @@ is noted `witness-differs:FILE@hex` and graded low (REALLOC, SPRINTF).
 
 This corroborates the instruction bytes of those modules only: not their
 fixup fields, their data segments, their record layout and other
-object-file metadata, or where their relocations point.  The modules
-therefore stay classified `inferred`, and their confidence is not raised
-(it is lowered where a witness contradicts the result and no program
-holds the rebuilt code).  The tool's output is a ledger, not an input to
-the rebuild, with one exception: where a reconstruction had to choose
-with no evidence of its own, the shipped code decides (SETJMP's
-near-code list).  Where the reconstruction
-has evidence of its own, a rule tested on the survivors or switches that
-reproduce the intact medium and large objects, a contradicting program
-lowers the grade and is recorded when no program holds the rebuilt code,
-and the bytes stay (REALLOC and SPRINTF); when another program does hold
-it, the module is noted `witness-mixed` and the grade stands (ISATTY,
-GETCTIME).
+object-file metadata, or where their relocations point.  The data
+segments that the matched code reaches through DGROUP were compared too,
+and differ from the rebuilt ones only in the alignment bytes of section
+7.4.  The modules therefore stay classified `inferred`, and their
+confidence is not raised (it is lowered where a witness contradicts the
+result and no program holds the rebuilt code).  The tool's output is a
+ledger, not an input to the rebuild, with two kinds of exception: where
+a reconstruction had to choose with no evidence of its own, the shipped
+code decides (SETJMP's near-code list, and the alignment bytes of
+section 7.4, decision 6).  Where the reconstruction has evidence of its
+own, a rule tested on the survivors or switches that reproduce the
+intact medium and large objects, a contradicting program lowers the
+grade and is recorded when no program holds the rebuilt code, and the
+bytes stay (REALLOC and SPRINTF); when another program does hold it, the
+module is noted `witness-mixed` and the grade stands (ISATTY, GETCTIME).

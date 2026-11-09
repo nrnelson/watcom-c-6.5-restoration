@@ -37,13 +37,13 @@ CLIBS,34,UNLINK,12848,224,224,original,,original,,,
 CLIBS,35,UNGETCH,13072,224,224,original,,original,,,
 CLIBS,36,TZSET,13296,512,512,original,,original,,,
 CLIBS,37,TELL,13808,240,240,original-repaired,,original,,,byte 14012 4C->6C: TELL PUBDEF: checksum fails with 4C; the dictionary names the public tell_; 6C fixes both
-CLIBS,38,SYSTEM,14048,352,288,anchored,convert,medium,,,
+CLIBS,38,SYSTEM,14048,352,288,anchored,convert,medium,,,pad-witnessed:DISK3/WMAKE.EXE@6d57
 CLIBS,39,STKSIZE,14400,176,0,inferred,convert,medium,,,
 CLIBS,40,STAT,14576,800,0,inferred,convert,medium,,,cross-jump overlapping-insns
 CLIBS,41,SPLITPAT,15376,384,0,inferred,convert,medium,,,
 CLIBS,42,SPAWNVPE,15760,480,0,inferred,convert,medium,,,overlapping-insns
 CLIBS,43,SPAWNVP,16240,224,0,inferred,convert,medium,,,
-CLIBS,44,SPAWNVE,16464,896,0,inferred,convert,low,,,call-far-indirect code-segment-ref kept-far-call overlapping-insns stack-check-size
+CLIBS,44,SPAWNVE,16464,896,0,inferred,convert,low,,,call-far-indirect code-segment-ref kept-far-call overlapping-insns stack-check-size pad-witnessed:DISK1/WCL.EXE@2b91
 CLIBS,45,SPAWNV,17360,224,0,inferred,convert,medium,,,
 CLIBS,46,SPAWNLPE,17584,256,0,inferred,convert,medium,,,
 CLIBS,47,SPAWNLP,17840,224,0,inferred,convert,medium,,,
@@ -161,7 +161,7 @@ CLIBS,158,STRLWR,52240,208,0,inferred,convert,medium,,,
 CLIBS,159,STRLEN,52448,208,0,inferred,convert,medium,,,
 CLIBS,160,STRICMP,52656,240,0,inferred,convert,medium,,,
 CLIBS,161,STRFTIME,52896,2000,0,inferred,convert,medium,,,stack-check-size
-CLIBS,162,STRERROR,54896,704,0,inferred,convert,medium,,,
+CLIBS,162,STRERROR,54896,704,0,inferred,convert,medium,,,pad-witnessed:DISK2/WCPP.EXE@8a4b pad-witnessed:DISK2/WCPP.EXE@8a5f pad-witnessed:DISK2/WCPP.EXE@8ab1
 CLIBS,163,STRDUP,55600,256,0,inferred,convert,medium,,,
 CLIBS,164,strcspn,55856,288,0,inferred,convert,medium,,,name-case-from-dictionary
 CLIBS,165,STRCPY,56144,224,0,inferred,convert,medium,,,overlapping-insns
